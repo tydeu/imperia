@@ -5,7 +5,6 @@ Authors: Mac Malone
 -/
 import Lean.Meta.Tactic.Simp.Simproc
 
-namespace String
 open Lean Meta Simp
 
 instance : ToExpr String.Pos where
@@ -18,33 +17,34 @@ def getStringPosValue? (e : Expr) : MetaM (Option String.Pos) := do
   | String.Pos.mk e => (·.map (⟨·⟩)) <$> getNatValue? e
   | _ => (·.map (⟨·.1⟩)) <$> getOfNatValue? e ``String.Pos
 
+namespace String
+
 simproc [simp] reduceGet (String.get _ _) := fun e => do
   let_expr String.get s p ← e | return .continue
-  let .lit (.strVal s) := s | return .continue
+  let some s := getStringValue? s | return .continue
   let some p ← getStringPosValue? p | return .continue
   return .done { expr := toExpr (s.get p) }
 
 simproc [simp] reduceNext (String.next _ _) := fun e => do
   let_expr String.next s p ← e | return .continue
-  let .lit (.strVal s) := s | return .continue
+  let some s := getStringValue? s | return .continue
   let some p ← getStringPosValue? p | return .continue
   return .done { expr := toExpr (s.next p) }
 
 simproc [simp] reduceAtEnd (String.atEnd _ _) := fun e => do
   let_expr String.atEnd s p ← e | return .continue
-  let .lit (.strVal s) := s | return .continue
+  let some s := getStringValue? s | return .continue
   let some p ← getStringPosValue? p | return .continue
   return .done { expr := toExpr (s.atEnd p) }
 
 simproc [simp] reduceUtf8ByteSize (String.utf8ByteSize _) := fun e => do
   let_expr String.utf8ByteSize s ← e | return .continue
-  let .lit (.strVal s) := s | return .continue
-  return .done { expr := toExpr (s.utf8ByteSize) }
-
-simproc [simp] reduceCSize (String.csize _) := fun e => do
-  let_expr String.csize c ← e | return .continue
-  let_expr Char.ofNat c ← c | return .continue
-  let .lit (.natVal c) := c | return .continue
-  return .done { expr := toExpr (String.csize (Char.ofNat c)) }
+  let some s := getStringValue? s | return .continue
+  return .done { expr := toExpr s.utf8ByteSize }
 
 end String
+
+simproc [simp] Char.reduceUtf8Size (Char.utf8Size _) := fun e => do
+  let_expr Char.utf8Size c ← e | return .continue
+  let some c ← getCharValue? c | return .continue
+  return .done { expr := toExpr c.utf8Size }
