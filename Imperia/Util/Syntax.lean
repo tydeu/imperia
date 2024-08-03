@@ -19,8 +19,6 @@ instance : Coe Term DoElem where
 instance : Coe Ident (TSyntax ``binderIdent) where
   coe x := Unhygienic.run `(binderIdent|$x:ident)
 
-#check Term.binderIdent
-
 def mkBinderIdentPat (x : TSyntax [identKind, ``Term.hole]) : Term := Unhygienic.run do
   match x with
   | `($id:ident) => pure id
