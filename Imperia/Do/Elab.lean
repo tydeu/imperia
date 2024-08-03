@@ -31,7 +31,7 @@ macro_rules
   if let some tk := mutTk? then
     Macro.throwErrorAt tk "`mut` has not been implemented for `μdo`"
   let body ← mkMDoOfElems xs
-  mkMDoTerm d fun d => `(let $(⟨d⟩):letDecl; $body)
+  mkMDoTerm d fun d => `(let $d:letDecl; $body)
 
 -- doLetElse
 macro_rules
@@ -61,6 +61,20 @@ macro_rules
         return #[patAlt]
     mkMDoBind bindTk (← mkMDoOfElem v) `(fun $alts:matchAlt*)
   | x => Macro.throwErrorAt x "ill-formed let declaration"
+
+-- doMatch
+macro_rules
+| `(μdo% $stx:doMatch) => do
+  let `(Term.doMatch|match%$tk $(generalizing?)? $(motive?)? $discrs,* with $alts:matchAlt*) := stx
+    | Macro.throwErrorAt stx "ill-formed `do` match syntax"
+  withRef tk do
+  let alts ← alts.mapM mkMDoMatchAlt
+  if let some motive := motive? then
+    let (_, lifts) ← expandLiftMethod motive
+    unless lifts.isEmpty do
+      Macro.throwErrorAt motive "cannot lift `(<- ...)` over motive"
+  mkMDoTerms discrs.getElems fun discrs =>
+  `(match $(generalizing?)? $(motive?)? $discrs,* with $alts:matchAlt*)
 
 def mkMDoIf (c : TSyntax ``Term.doIfCond) (t e : Term) : MacroM Term := do
   match c with
@@ -133,7 +147,7 @@ macro_rules
       else
         ``(HTryCatch.tryCatchOut $x fun $e => $c)
     | `(Term.doCatchMatch|catch $[$alts:matchAlt]*) =>
-      let alts ← alts.mapM mkMDoAlt
+      let alts ← alts.mapM mkMDoMatchAlt
       ``(HTryCatch.tryCatchOut $x fun $[$alts:matchAlt]*)
     | c => Macro.throwErrorAt c ""
   let x ←

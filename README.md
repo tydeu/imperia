@@ -1,6 +1,6 @@
 # Imperia
 
-Imperia is a **work-in-progress** experiment with imperative programming in Lean. At present, the focus is an alternative `do` notation (using the keyword `μdo`) that supports non-monadic types. However, the implementation is not complete, so it is currently lacking many features of the standard `do` notation (e.g., `for`, `mut`, `match`).
+Imperia is a **work-in-progress** experiment with imperative programming in Lean. At present, the focus is an alternative `do` notation (using the keyword `μdo`) that supports non-monadic types. However, the implementation is not complete, so it is currently lacking many features of the standard `do` notation (e.g., `for`, `mut`).
 
 ## Example
 

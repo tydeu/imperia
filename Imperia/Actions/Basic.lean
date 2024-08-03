@@ -14,6 +14,10 @@ class Nop (μ : Type u) where
 
 export Nop (nop)
 
+instance : Nop PUnit := ⟨⟨⟩⟩
+
+@[simp] theorem nop_eq_unit : (nop : PUnit) = ⟨⟩ := rfl
+
 instance [Pure m] : Nop (m PUnit) := ⟨pure ⟨⟩⟩
 
 @[simp] theorem nop_eq_pure [Pure m] : (nop : m PUnit) = pure ⟨⟩ := rfl
@@ -58,3 +62,8 @@ class MonadHBind (m : Type u₁ → Type v₁) (n : Type u₂ → Type v₂) whe
 @[default_instance] instance [MonadHBind m n] : MBind m (n α) := ⟨MonadHBind.bind⟩
 
 @[default_instance] instance [Bind m] : MonadHBind m m := ⟨Bind.bind⟩
+
+/-! # AndThen -/
+
+instance : AndThen PUnit := ⟨fun _ f => f ()⟩
+instance : HAndThen PUnit.{u+1} PUnit.{v+1} PUnit.{v+1} := ⟨fun _ f => f ()⟩

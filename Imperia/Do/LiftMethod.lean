@@ -77,11 +77,11 @@ structure DoLift where
   deriving BEq
 
 variable (baseId : Name) in
-partial def expandLiftMethodAux (inQuot : Bool) (inBinder : Bool) : Syntax → StateT (List DoLift) MacroM Syntax
+partial def expandLiftMethodAux (inQuot : Bool) (inBinder : Bool) : Syntax → StateT (Array DoLift) MacroM Syntax
   | stx@(Syntax.node i k args) =>
     if k == choiceKind then do
       -- choice node: check that lifts are consistent
-      let alts ← stx.getArgs.mapM (expandLiftMethodAux inQuot inBinder · |>.run [])
+      let alts ← stx.getArgs.mapM (expandLiftMethodAux inQuot inBinder · |>.run #[])
       let (_, lifts) := alts[0]!
       unless alts.all (·.2 == lifts) do
         Macro.throwErrorAt stx "cannot lift `(<- ...)` over inconsistent syntax variants, consider lifting out the binding manually"
@@ -102,8 +102,8 @@ partial def expandLiftMethodAux (inQuot : Bool) (inBinder : Bool) : Syntax → S
       let term := args[1]!
       let term  ← expandLiftMethodAux inQuot inBinder term
       -- keep name deterministic across choice branches
-      let id ← mkIdentFromRef (.num baseId (← get).length)
-      modify fun s => s ++ [⟨ref, id, ⟨term⟩⟩]
+      let id ← mkIdentFromRef (.num baseId (← get).size)
+      modify fun s => s.push ⟨ref, id, ⟨term⟩⟩
       return id
     else do
       let inAntiquot := stx.isAntiquot && !stx.isEscapedAntiquot
@@ -112,10 +112,12 @@ partial def expandLiftMethodAux (inQuot : Bool) (inBinder : Bool) : Syntax → S
       return Syntax.node i k args
   | stx => return stx
 
-def expandLiftMethod (stx : Syntax) : MacroM (List DoLift × Syntax) := do
+def expandLiftMethodM (stx : Syntax) : StateT (Array DoLift) MacroM Syntax := do
   if !hasLiftMethod stx then
-    return ([], stx)
+    return stx
   else
     let baseId ← withFreshMacroScope (MonadQuotation.addMacroScope `_μdo_lift)
-    let (stx, doLifts) ← (expandLiftMethodAux baseId false false stx).run []
-    return (doLifts, stx)
+    expandLiftMethodAux baseId false false stx
+
+def expandLiftMethod (stx : Syntax) : MacroM (Syntax × Array DoLift) := do
+  expandLiftMethodM stx |>.run #[]

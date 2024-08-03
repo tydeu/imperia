@@ -33,13 +33,19 @@ def mkMDoOfElems (xs : Array DoElem) : MacroM Term := do
 def mkMDoBind (ref : Syntax) (val : Term) (body : MacroM Term) : MacroM Term :=
   withRef ref do `($val >>= $(← body))
 
-def mkMDoBindOfLifts (lifts : List DoLift) (body : Term) : MacroM Term :=
+def mkMDoBindOfLifts (lifts : Array DoLift) (body : Term) : MacroM Term :=
   lifts.foldrM (init := body) fun {ref, id, val} body =>
     mkMDoBind ref val `(fun $id => $body)
 
 @[inline] def mkMDoTerm (stx : TSyntax ks) (mkBody : TSyntax ks → MacroM Term) : MacroM Term := do
-  let (lifts, stx) ← expandLiftMethod stx
+  let (stx, lifts) ← expandLiftMethod stx
   let body ← mkBody ⟨stx⟩
+  mkMDoBindOfLifts lifts body
+
+@[inline] def mkMDoTerms (xs : Array (TSyntax ks)) (mkBody : Array (TSyntax ks) → MacroM Term) : MacroM Term := do
+  let (xs, lifts) ← StateT.run (s := #[]) <| xs.mapM fun stx =>
+    (⟨.⟩) <$> expandLiftMethodM stx
+  let body ← mkBody xs
   mkMDoBindOfLifts lifts body
 
 def mkMDoAndThen (x : Term) (xs : Array DoElem) : MacroM Term := do
@@ -50,7 +56,7 @@ def mkMDoAndThen (x : Term) (xs : Array DoElem) : MacroM Term := do
 
 abbrev doMatchAlt := Term.matchAlt Term.doSeq
 
-def mkMDoAlt (alt : TSyntax ``Term.matchAlt) : MacroM (TSyntax ``Term.matchAlt) := do
+def mkMDoMatchAlt (alt : TSyntax ``Term.matchAlt) : MacroM (TSyntax ``Term.matchAlt) := do
   let `(doMatchAlt| | $[$pats,*]|* => $x) := alt
     | Macro.throwErrorAt alt "ill-formed `do` match alternative"
   `(Term.matchAltExpr| | $[$pats,*]|* => $(← mkMDoOfSeq x))
