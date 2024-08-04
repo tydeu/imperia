@@ -15,7 +15,10 @@ namespace Imperia
 /-! ## `μdo` Syntax -/
 
 scoped syntax:arg (name := termMDo) "μdo " doSeq : term
-scoped syntax:arg (name := μdoNested) (priority := high) "μdo " doSeq : doElem
+
+syntax μdoNested := "μdo " doSeq
+attribute [scoped doElem_parser high] μdoNested
+
 scoped syntax:arg (name := μdoSeq) "μdo% " (ppLine doElem)+ : term
 
 /-! ## `μdo` Syntax Utilities -/

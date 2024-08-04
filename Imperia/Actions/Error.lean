@@ -110,5 +110,7 @@ macro_rules
   else
     ``(Throw.throw ())
 
-syntax (name := doRaise) (priority := high) raiseStmt : doElem
+syntax doRaise := raiseStmt
+attribute [scoped doElem_parser high] doRaise
+
 macro_rules | `(doElem|raise $(e?)?) => `(raise $(e?)?)

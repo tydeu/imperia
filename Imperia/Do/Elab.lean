@@ -11,31 +11,40 @@ open Lean Parser
 namespace Imperia
 
 -- μdoNested
-macro_rules
-| `(μdo% μdo $x:doSeq $xs*) => do
-  mkMDoAndThen (← withRef x ``(Cont.block μdo $x)) xs
+macro_rules | `(μdo% $x:μdoNested $xs*) => do
+  let `(μdoNested|μdo $s:doSeq) := x
+    | Macro.throwErrorAt x "ill-formed nested `μdo` syntax"
+  withRef x.raw[0] do
+  let b ← ``(Cont.block μdo $s)
+  mkMDoAndThen b xs
 
 -- doNested
-macro_rules
-| `(μdo% do $x:doSeq $xs*) => do
+macro_rules | `(μdo% $x:doNested $xs*) => do
+  let `(Term.doNested|do $x:doSeq) := x
+    | Macro.throwErrorAt x "ill-formed nested `do` syntax"
   mkMDoAndThen (← mkMDoOfSeq x) xs
 
 -- doExpr
-macro_rules
-| `(μdo% $x:term $xs:doElem*) =>
+macro_rules | `(μdo% $x:doExpr $xs*) => do
+  let `(Term.doExpr|$x:term) := x
+    | Macro.throwErrorAt x "ill-formed `do` expression"
   mkMDoTerm x fun x => mkMDoAndThen x xs
 
 -- doLet
-macro_rules
-| `(μdo% let%$tk $[mut%$mutTk?]? $d:letDecl $xs:doElem*) => withRef tk do
+macro_rules | `(μdo% $x:doLet $xs*) => do
+  let `(Term.doLet|let%$tk $[mut%$mutTk?]? $d:letDecl) := x
+    | Macro.throwErrorAt x "ill-formed `do` let syntax"
+  withRef tk do
   if let some tk := mutTk? then
     Macro.throwErrorAt tk "`mut` has not been implemented for `μdo`"
   let body ← mkMDoOfElems xs
   mkMDoTerm d fun d => `(let $d:letDecl; $body)
 
 -- doLetElse
-macro_rules
-| `(μdo% let%$tk $[mut%$mutTk?]? $pat := $v | $e:doSeq $xs:doElem*) => withRef tk do
+macro_rules | `(μdo% $x:doLetElse $xs*) => do
+  let `(Term.doLetElse|let%$tk $[mut%$mutTk?]? $pat := $v | $e:doSeq) := x
+    | Macro.throwErrorAt x "ill-formed `do` let syntax"
+  withRef tk do
   if let some tk := mutTk? then
     Macro.throwErrorAt tk "`mut` has not been implemented for `μdo`"
   let e ← mkMDoOfSeq e
@@ -43,8 +52,10 @@ macro_rules
   mkMDoTerm v fun v => `(if let $pat := $v then $body else $e)
 
 -- doLetArrow
-macro_rules
-| `(μdo% let%$letTk $[mut%$mutTk?]? $decl $xs:doElem*) => withRef letTk do
+macro_rules | `(μdo% $x:doLetArrow $xs*) => do
+  let `(Term.doLetArrow|let%$letTk $[mut%$mutTk?]? $decl) := x
+    | Macro.throwErrorAt x "ill-formed `do` let syntax"
+  withRef letTk do
   if let some tk := mutTk? then
     Macro.throwErrorAt tk "`mut` has not been implemented for `μdo`"
   match decl with
@@ -86,11 +97,13 @@ def mkMDoIf (c : TSyntax ``Term.doIfCond) (t e : Term) : MacroM Term := do
     mkMDoTerm c fun c => `(if $h :%$tk $c then $t else $e)
   | `(Term.doIfCond|$c:term) =>
     mkMDoTerm c fun c => `(if $c then $t else $e)
-  | c => Macro.throwErrorAt c "ill-formed do `if` condition"
+  | c => Macro.throwErrorAt c "ill-formed `do` if condition"
 
 -- doIf
-macro_rules
-| `(μdo% if $c:doIfCond then $t $[else if $ecs:doIfCond then $ets]* $[else $e?]? $xs*) => do
+macro_rules | `(μdo% $x:doIf $xs*) => do
+  let `(Term.doIf|if%$tk $c:doIfCond then $t $[else if $ecs:doIfCond then $ets]* $[else $e?]?) := x
+    | Macro.throwErrorAt x "ill-formed `do` if syntax"
+  withRef tk do
   mkMDoJmp xs fun jmp => do
   let e ← if let some e := e? then mkMDoSeqJmp e jmp else jmp.mkTerm
   let e ← (ecs.zip ets).foldrM (init := e) fun (c, t) e => do
@@ -98,16 +111,20 @@ macro_rules
   mkMDoIf c (← mkMDoSeqJmp t jmp) e
 
 -- doUnless
-macro_rules
-| `(μdo% unless $c do $x:doSeq $xs*) => do
+macro_rules | `(μdo% $x:doUnless $xs*) => do
+  let `(Term.doUnless|unless%$tk $c do $x:doSeq) := x
+    | Macro.throwErrorAt x "ill-formed `do` unless syntax"
+  withRef tk do
   mkMDoJmp xs fun jmp => do
   let x ← mkMDoSeqJmp x jmp
   let jmp ← jmp.mkTerm
   mkMDoTerm c fun c => `(if $c then $jmp else $x)
 
 -- doReturn
-macro_rules
-| `(μdo% return%$tk $(v?)? $xs*) => withRef tk do
+macro_rules | `(μdo% $x:doReturn $xs*) => do
+  let `(Term.doReturn|return%$tk $(v?)?) := x
+    | Macro.throwErrorAt x "ill-formed `do` return syntax"
+  withRef tk do
   if xs.size > 0 then
     Macro.throwErrorAt tk "return must be the last element in a `do` sequence"
   else if let some v := v? then
@@ -116,8 +133,10 @@ macro_rules
     ``(halt)
 
 -- doRaise
-macro_rules
-| `(μdo% raise%$tk $(v?)? $xs*) => withRef tk do
+macro_rules | `(μdo% $x:doRaise $xs*) => do
+  let `(doRaise|raise%$tk $(v?)?) := x
+    | Macro.throwErrorAt x "ill-formed `do` raise syntax"
+  withRef tk do
   if xs.size > 0 then
     Macro.throwErrorAt tk "raise must be the last element in a `do` sequence"
   else if let some v := v? then
@@ -126,8 +145,10 @@ macro_rules
     ``(Throw.throw ())
 
 -- doTry
-macro_rules
-| `(μdo% try%$tk $x:doSeq $catches* $[$f?:doFinally]? $xs*) => withRef tk do
+macro_rules | `(μdo% $x:doTry $xs*) => do
+  let `(Term.doTry|try%$tk $x:doSeq $catches* $[$f?:doFinally]?) := x
+    | Macro.throwErrorAt x "ill-formed `do` try syntax"
+  withRef tk do
   mkMDoJmp xs fun jmp => do
   let x ← mkMDoSeqJmp x jmp
   let x ← catches.foldlM (init := x) fun x c => do
