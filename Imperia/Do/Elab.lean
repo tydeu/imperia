@@ -63,16 +63,16 @@ macro_rules
   | x => Macro.throwErrorAt x "ill-formed let declaration"
 
 -- doMatch
-macro_rules
-| `(μdo% $stx:doMatch) => do
+macro_rules | `(μdo% $stx:doMatch $xs*) => do
   let `(Term.doMatch|match%$tk $(generalizing?)? $(motive?)? $discrs,* with $alts:matchAlt*) := stx
     | Macro.throwErrorAt stx "ill-formed `do` match syntax"
   withRef tk do
-  let alts ← alts.mapM mkMDoMatchAlt
   if let some motive := motive? then
     let (_, lifts) ← expandLiftMethod motive
     unless lifts.isEmpty do
       Macro.throwErrorAt motive "cannot lift `(<- ...)` over motive"
+  mkMDoJmp xs fun jmp => do
+  let alts ← mkMDoMatchAlts alts jmp
   mkMDoTerms discrs.getElems fun discrs =>
   `(match $(generalizing?)? $(motive?)? $discrs,* with $alts:matchAlt*)
 
@@ -91,28 +91,19 @@ def mkMDoIf (c : TSyntax ``Term.doIfCond) (t e : Term) : MacroM Term := do
 -- doIf
 macro_rules
 | `(μdo% if $c:doIfCond then $t $[else if $ecs:doIfCond then $ets]* $[else $e?]? $xs*) => do
-  if h : xs.size > 0 then
-    mkMDoJmp xs h fun jmp => do
-      let e ← if let some e := e? then mkMDoSeqThenJmp e jmp else pure jmp
-      let e ← (ecs.zip ets).foldrM (init := e) fun (c, t) e => do
-        mkMDoIf c (← mkMDoSeqThenJmp t jmp) e
-      mkMDoIf c (← mkMDoSeqThenJmp t jmp) e
-  else
-    let e ← if let some e := e? then mkMDoOfSeq e else ``(nop)
-    let e ← (ecs.zip ets).foldrM (init := e) fun (c, t) e => do
-      mkMDoIf c (← mkMDoOfSeq t) e
-    mkMDoIf c (← mkMDoOfSeq t) e
+  mkMDoJmp xs fun jmp => do
+  let e ← if let some e := e? then mkMDoSeqJmp e jmp else jmp.mkTerm
+  let e ← (ecs.zip ets).foldrM (init := e) fun (c, t) e => do
+    mkMDoIf c (← mkMDoSeqJmp t jmp) e
+  mkMDoIf c (← mkMDoSeqJmp t jmp) e
 
 -- doUnless
 macro_rules
 | `(μdo% unless $c do $x:doSeq $xs*) => do
-  if h : xs.size > 0 then
-    mkMDoJmp xs h fun jmp => do
-      let x ← mkMDoSeqThenJmp x jmp
-      mkMDoTerm c fun c => `(if $c then $jmp else $x)
-  else
-    let x ← mkMDoOfSeq x
-    mkMDoTerm c fun c => `(if $c then nop else $x)
+  mkMDoJmp xs fun jmp => do
+  let x ← mkMDoSeqJmp x jmp
+  let jmp ← jmp.mkTerm
+  mkMDoTerm c fun c => `(if $c then $jmp else $x)
 
 -- doReturn
 macro_rules
@@ -136,23 +127,25 @@ macro_rules
 
 -- doTry
 macro_rules
-| `(μdo% try%$tk $x:doSeq $catches* $[finally $f?]? $xs*) => withRef tk do
-  let x ← mkMDoOfSeq x
-  let x ← catches.foldlM (init := x) fun x c => withRef c do
+| `(μdo% try%$tk $x:doSeq $catches* $[$f?:doFinally]? $xs*) => withRef tk do
+  mkMDoJmp xs fun jmp => do
+  let x ← mkMDoSeqJmp x jmp
+  let x ← catches.foldlM (init := x) fun x c => do
     match c with
-    | `(Term.doCatch|catch $e $[: $ty?]? => $c) =>
-      let c ← mkMDoOfSeq c
+    | `(Term.doCatch|catch%$tk $e $[: $ty?]? => $c) => withRef tk do
+      let c ← mkMDoSeqJmp c jmp
       if let some ty := ty? then
         ``(HTryCatch.tryCatchThe $ty $x fun $e => $c)
       else
         ``(HTryCatch.tryCatchOut $x fun $e => $c)
-    | `(Term.doCatchMatch|catch $[$alts:matchAlt]*) =>
-      let alts ← alts.mapM mkMDoMatchAlt
+    | `(Term.doCatchMatch|catch%$tk $[$alts:matchAlt]*) => withRef tk do
+      let alts ← mkMDoMatchAlts alts jmp
       ``(HTryCatch.tryCatchOut $x fun $[$alts:matchAlt]*)
-    | c => Macro.throwErrorAt c ""
-  let x ←
-    if let some f := f? then
-      withRef f ``(TryFinally.tryFinally $x μdo% $(← expandDoSeq f)*)
-    else
-      pure x
-  mkMDoAndThen x xs
+    | c => Macro.throwErrorAt c "ill-formed `do` catch syntax"
+  if let some f := f? then
+    let `(Term.doFinally|finally%$tk $f) := f
+      | Macro.throwErrorAt f "ill-formed `do` finally syntax"
+    let f ← mkMDoSeqJmp f jmp
+    withRef tk ``(TryFinally.tryFinally $x $f)
+  else
+    return x

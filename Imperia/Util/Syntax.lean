@@ -13,6 +13,9 @@ namespace Imperia
 abbrev DoElem := TSyntax `doElem
 abbrev DoSeq := TSyntax ``Term.doSeq
 
+abbrev MatchAlt := TSyntax ``Term.matchAlt
+abbrev doMatchAlt := Term.matchAlt Term.doSeq
+
 instance : Coe Term DoElem where
   coe x := Unhygienic.run `(doElem|$x:term)
 

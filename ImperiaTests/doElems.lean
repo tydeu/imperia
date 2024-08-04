@@ -24,6 +24,11 @@ def doLetMut : Unit := μdo
   ()
 
 def doMatch : Unit := μdo
+  -- w/ jump
+  match ← pure 0 with
+  | 0 => ← pure ()
+  | _ => ← pure ()
+  -- w/o jump
   match ← pure 0 with
   | 0 => ← pure ()
   | _ => ← pure ()

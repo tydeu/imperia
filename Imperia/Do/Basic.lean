@@ -54,25 +54,34 @@ def mkMDoAndThen (x : Term) (xs : Array DoElem) : MacroM Term := do
   else
     return x
 
-abbrev doMatchAlt := Term.matchAlt Term.doSeq
+abbrev MDoJmp := Option Ident
 
-def mkMDoMatchAlt (alt : TSyntax ``Term.matchAlt) : MacroM (TSyntax ``Term.matchAlt) := do
-  let `(doMatchAlt| | $[$pats,*]|* => $x) := alt
-    | Macro.throwErrorAt alt "ill-formed `do` match alternative"
-  `(Term.matchAltExpr| | $[$pats,*]|* => $(← mkMDoOfSeq x))
+@[inline] def MDoJmp.mkTerm (jmp : MDoJmp) : MacroM Term :=
+  if let some jmp := jmp then pure jmp else ``(nop)
 
 @[always_inline, inline]
-def mkMDoJmp
-  [Monad m] [MonadQuotation m]
-  (xs : Array DoElem) (h : xs.size > 0) (f : Ident → m Term)
-: m Term := do
-  let jmp : Ident ← withRef xs[0] `(_μdo_jmp)
-  let body ← f jmp
-  withRef xs[0]  `(let $jmp := μdo% $xs*; $body)
+def mkMDoJmp (xs : Array DoElem) (f : MDoJmp → MacroM Term) : MacroM Term := do
+  if h : xs.size > 0 then
+    let jmp : Ident ← withRef xs[0] `(_μdo_jmp)
+    let body ← f jmp
+    withRef xs[0]  `(let $jmp := μdo% $xs*; $body)
+  else
+    f none
 
 @[inline]
-def mkMDoSeqThenJmp (x : DoSeq) (jmp : Ident) : MacroM Term := do
-  mkMDoAndThen (← mkMDoOfSeq x) #[jmp]
+def mkMDoSeqJmp (x : DoSeq) (jmp : MDoJmp) : MacroM Term := do
+  let x ← mkMDoOfSeq x
+  if let some jmp := jmp then
+    mkMDoBind jmp x `(fun () => $jmp)
+  else
+    return x
+
+def mkMDoMatchAlts (alts : Array MatchAlt) (jmp : MDoJmp) : MacroM (Array MatchAlt) := do
+  alts.mapM fun alt => do
+  let `(doMatchAlt| | $[$pats,*]|* => $x) := alt
+    | Macro.throwErrorAt alt "ill-formed `do` match alternative"
+  `(Term.matchAltExpr| | $[$pats,*]|* => $(← mkMDoSeqJmp x jmp))
+
 
 /-! ## `μdo` Implementations -/
 
