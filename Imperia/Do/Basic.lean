@@ -85,14 +85,82 @@ def mkMDoMatchAlts (alts : Array MatchAlt) (jmp : MDoJmp) : MacroM (Array MatchA
     | Macro.throwErrorAt alt "ill-formed `do` match alternative"
   `(Term.matchAltExpr| | $[$pats,*]|* => $(← mkMDoSeqJmp x jmp))
 
+/-! ## `μdo` Elab Attribute -/
 
-/-! ## `μdo` Implementations -/
+open Elab
+
+abbrev MDoElabM := TermElabM
+abbrev MDoElab := DoElem → Array DoElem → Option Expr → MDoElabM Expr
+
+initialize μdoElabAttr : KeyedDeclsAttribute MDoElab ←
+  unsafe mkElabAttribute MDoElab `builtin_μdo_elab `μdo_elab `Lean.Parser.Term ``MDoElab "μdo"
+
+def elabMDoError
+  (x : DoElem) (xs : Array DoElem)
+  (expectedType? : Option Expr) (errMsg : MessageData)
+: TermElabM Expr := do
+  if h : xs.size > 0 then
+    logErrorAt x errMsg
+    let x ← withRef xs[0] `(μdo% $xs*)
+    Term.elabTerm x expectedType?
+  else
+    throwErrorAt x errMsg
+
+def elabMDoUsing
+  (s : Term.SavedState)
+  (x : DoElem) (xs : Array DoElem) (expectedType? : Option Expr)
+  (elabFns : List (KeyedDeclsAttribute.AttributeEntry MDoElab) )
+: TermElabM Expr := do
+  if let elabFn::elabFns := elabFns then
+    try
+      Term.withInfoContext' x (mkInfo := Term.mkTermInfo elabFn.declName (expectedType? := expectedType?) x) do
+        elabFn.value x xs expectedType?
+    catch
+      | ex@(.internal id _) =>
+        if id == unsupportedSyntaxExceptionId then
+          s.restore
+          elabMDoUsing s x xs expectedType? elabFns
+        else
+          throw ex
+      | ex =>
+        throw ex
+  else
+    elabMDoError x xs expectedType?
+      m!"`μdo` elaborator(s) were unable to process the do element syntax{indentD x}"
+
+@[term_elab μdoSeq]
+def elabMDoSeq : Term.TermElab := fun stx expectedType? => do
+  let `(μdo% $x $xs:doElem*) := stx
+    | throwErrorAt stx "ill-formed `μdo` sequence"
+  let k := x.raw.getKind
+  withTraceNode `Elab.step (fun _ => return m!"expected type: {expectedType?}, μdo element\n{x}")
+    (tag := k.toString) do
+  let env ← getEnv
+  match μdoElabAttr.getEntries env k with
+  | [] =>
+    withFreshMacroScope do withIncRecDepth do
+    match (← liftMacroM (expandMacroImpl? env x)) with
+    | some (decl, xNew?) =>
+      let xNew ← liftMacroM <| liftExcept xNew?
+      let stxNew ← `(μdo% $(⟨xNew⟩) $xs*)
+      Term.withInfoContext' x (mkInfo := Term.mkTermInfo decl (expectedType? := expectedType?) x) <|
+      Term.withMacroExpansion stx stxNew do
+      withRef stxNew <| Term.elabTerm stxNew expectedType?
+    | _ =>
+      elabMDoError x xs expectedType?
+        m!"do element `{mkConst k}` has not been implemented for `μdo`"
+  | elabFns =>
+    elabMDoUsing (← saveState) x xs expectedType? elabFns
+
+@[inline]
+def adaptMDoMacro (f : DoElem → Array DoElem → MacroM Term) : MDoElab :=
+  fun x xs expectedType? => do
+  let stx ← `(μdo% $x $xs*)
+  let exp ← liftMacroM do f x xs
+  Term.withMacroExpansion stx exp do
+  Term.elabTerm exp expectedType?
+
+/-! ## `μdo` Implementation -/
 
 macro_rules
 | `(μdo $x) => do ``(Cont.run $(← mkMDoOfSeq x))
-
-elab_rules : term
-| `(μdo% $x $xs:doElem*) => do
-  let kind := mkConst x.raw.getKind
-  logErrorAt x m!"do element `{kind}` has not been implemented for `μdo`"
-  Term.elabTerm (← `(μdo% $xs*)) none

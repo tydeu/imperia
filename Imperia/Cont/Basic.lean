@@ -85,6 +85,9 @@ instance [Bind m] : MonadLift m (Cont (m α)) := ⟨Cont.lift⟩
 @[simp] theorem eq_liftM [Bind m] : (Cont.lift x : Cont (m β) α) = liftM x := rfl
 @[simp] theorem liftM_eq_bind [Bind m] : (liftM x : Cont (m β) α) = bind x := rfl
 
+instance : MonadFunctor m (Cont (m β)) where
+  monadMap f x := fun k => f (x k)
+
 /-! ## Termination -/
 
 /--
@@ -124,6 +127,8 @@ instance [SetReturn α μ] : Ret α (Cont μ β) := ⟨Cont.ret⟩
 /-- Run the CPS monad, discarding the result and returning the underlying imperative. -/
 @[always_inline, inline, pp_nodot] def run' [Nop μ] (x : Cont μ α) : μ :=
   x fun _ => nop
+
+instance [Nop μ] : Coe (Cont μ Unit) (Cont μ Empty) := ⟨(·.run')⟩
 
 /--
 Run `x` as independent imperative block.

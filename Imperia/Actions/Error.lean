@@ -113,4 +113,6 @@ macro_rules
 syntax doRaise := raiseStmt
 attribute [scoped doElem_parser high] doRaise
 
-macro_rules | `(doElem|raise $(e?)?) => `(raise $(e?)?)
+macro_rules | `(doElem|raise $(e?)?) => do
+  let t ← `(raise $(e?)?)
+  `(doElem|$t:term)

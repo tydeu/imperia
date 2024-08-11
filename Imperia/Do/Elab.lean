@@ -10,28 +10,28 @@ open Lean Parser
 
 namespace Imperia
 
--- μdoNested
-macro_rules | `(μdo% $x:μdoNested $xs*) => do
+@[μdo_elab μdoNested]
+def elabΜdoNested := adaptMDoMacro fun x xs => do
   let `(μdoNested|μdo $s:doSeq) := x
     | Macro.throwErrorAt x "ill-formed nested `μdo` syntax"
   withRef x.raw[0] do
   let b ← ``(Cont.block μdo $s)
   mkMDoAndThen b xs
 
--- doNested
-macro_rules | `(μdo% $x:doNested $xs*) => do
+@[μdo_elab doNested]
+def elabDoNested := adaptMDoMacro fun x xs => do
   let `(Term.doNested|do $x:doSeq) := x
     | Macro.throwErrorAt x "ill-formed nested `do` syntax"
   mkMDoAndThen (← mkMDoOfSeq x) xs
 
--- doExpr
-macro_rules | `(μdo% $x:doExpr $xs*) => do
+@[μdo_elab doExpr]
+def elabDoExpr := adaptMDoMacro fun x xs => do
   let `(Term.doExpr|$x:term) := x
     | Macro.throwErrorAt x "ill-formed `do` expression"
   mkMDoTerm x fun x => mkMDoAndThen x xs
 
--- doLet
-macro_rules | `(μdo% $x:doLet $xs*) => do
+@[μdo_elab doLet]
+def elabDoLet := adaptMDoMacro fun x xs => do
   let `(Term.doLet|let%$tk $[mut%$mutTk?]? $d:letDecl) := x
     | Macro.throwErrorAt x "ill-formed `do` let syntax"
   withRef tk do
@@ -40,8 +40,8 @@ macro_rules | `(μdo% $x:doLet $xs*) => do
   let body ← mkMDoOfElems xs
   mkMDoTerm d fun d => `(let $d:letDecl; $body)
 
--- doLetElse
-macro_rules | `(μdo% $x:doLetElse $xs*) => do
+@[μdo_elab doLetElse]
+def elabDoLetElse := adaptMDoMacro fun x xs => do
   let `(Term.doLetElse|let%$tk $[mut%$mutTk?]? $pat := $v | $e:doSeq) := x
     | Macro.throwErrorAt x "ill-formed `do` let syntax"
   withRef tk do
@@ -51,8 +51,8 @@ macro_rules | `(μdo% $x:doLetElse $xs*) => do
   let body ← mkMDoOfElems xs
   mkMDoTerm v fun v => `(if let $pat := $v then $body else $e)
 
--- doLetArrow
-macro_rules | `(μdo% $x:doLetArrow $xs*) => do
+@[μdo_elab doLetArrow]
+def elabDoLetArrow := adaptMDoMacro fun x xs => do
   let `(Term.doLetArrow|let%$letTk $[mut%$mutTk?]? $decl) := x
     | Macro.throwErrorAt x "ill-formed `do` let syntax"
   withRef letTk do
@@ -73,10 +73,10 @@ macro_rules | `(μdo% $x:doLetArrow $xs*) => do
     mkMDoBind bindTk (← mkMDoOfElem v) `(fun $alts:matchAlt*)
   | x => Macro.throwErrorAt x "ill-formed let declaration"
 
--- doMatch
-macro_rules | `(μdo% $stx:doMatch $xs*) => do
-  let `(Term.doMatch|match%$tk $(generalizing?)? $(motive?)? $discrs,* with $alts:matchAlt*) := stx
-    | Macro.throwErrorAt stx "ill-formed `do` match syntax"
+@[μdo_elab doMatch]
+def elabDoMatch := adaptMDoMacro fun x xs => do
+  let `(Term.doMatch|match%$tk $(generalizing?)? $(motive?)? $discrs,* with $alts:matchAlt*) := x
+    | Macro.throwErrorAt x "ill-formed `do` match syntax"
   withRef tk do
   if let some motive := motive? then
     let (_, lifts) ← expandLiftMethod motive
@@ -99,8 +99,8 @@ def mkMDoIf (c : TSyntax ``Term.doIfCond) (t e : Term) : MacroM Term := do
     mkMDoTerm c fun c => `(if $c then $t else $e)
   | c => Macro.throwErrorAt c "ill-formed `do` if condition"
 
--- doIf
-macro_rules | `(μdo% $x:doIf $xs*) => do
+@[μdo_elab doIf]
+def elabDoIf := adaptMDoMacro fun x xs => do
   let `(Term.doIf|if%$tk $c:doIfCond then $t $[else if $ecs:doIfCond then $ets]* $[else $e?]?) := x
     | Macro.throwErrorAt x "ill-formed `do` if syntax"
   withRef tk do
@@ -110,8 +110,8 @@ macro_rules | `(μdo% $x:doIf $xs*) => do
     mkMDoIf c (← mkMDoSeqJmp t jmp) e
   mkMDoIf c (← mkMDoSeqJmp t jmp) e
 
--- doUnless
-macro_rules | `(μdo% $x:doUnless $xs*) => do
+@[μdo_elab doUnless]
+def elabDoUnless := adaptMDoMacro fun x xs => do
   let `(Term.doUnless|unless%$tk $c do $x:doSeq) := x
     | Macro.throwErrorAt x "ill-formed `do` unless syntax"
   withRef tk do
@@ -120,8 +120,8 @@ macro_rules | `(μdo% $x:doUnless $xs*) => do
   let jmp ← jmp.mkTerm
   mkMDoTerm c fun c => `(if $c then $jmp else $x)
 
--- doReturn
-macro_rules | `(μdo% $x:doReturn $xs*) => do
+@[μdo_elab doReturn]
+def elabDoReturn := adaptMDoMacro fun x xs => do
   let `(Term.doReturn|return%$tk $(v?)?) := x
     | Macro.throwErrorAt x "ill-formed `do` return syntax"
   withRef tk do
@@ -132,8 +132,8 @@ macro_rules | `(μdo% $x:doReturn $xs*) => do
   else
     ``(halt)
 
--- doRaise
-macro_rules | `(μdo% $x:doRaise $xs*) => do
+@[μdo_elab doRaise]
+def elabDoRaise := adaptMDoMacro fun x xs => do
   let `(doRaise|raise%$tk $(v?)?) := x
     | Macro.throwErrorAt x "ill-formed `do` raise syntax"
   withRef tk do
@@ -144,8 +144,8 @@ macro_rules | `(μdo% $x:doRaise $xs*) => do
   else
     ``(Throw.throw ())
 
--- doTry
-macro_rules | `(μdo% $x:doTry $xs*) => do
+@[μdo_elab doTry]
+def elabDoTry := adaptMDoMacro fun x xs => do
   let `(Term.doTry|try%$tk $x:doSeq $catches* $[$f?:doFinally]?) := x
     | Macro.throwErrorAt x "ill-formed `do` try syntax"
   withRef tk do
