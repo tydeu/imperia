@@ -15,7 +15,8 @@ def elabΜdoNested := adaptMDoMacro fun x xs => do
   let `(μdoNested|μdo $s:doSeq) := x
     | Macro.throwErrorAt x "ill-formed nested `μdo` syntax"
   withRef x.raw[0] do
-  let b ← ``(Cont.block μdo $s)
+  let s ← mkMDoOfSeq s
+  let b ← ``(Cont.block $s)
   mkMDoAndThen b xs
 
 @[μdo_elab doNested]
@@ -143,30 +144,3 @@ def elabDoRaise := adaptMDoMacro fun x xs => do
     mkMDoTerm v fun v => ``(Throw.throw $v)
   else
     ``(Throw.throw ())
-
-@[μdo_elab doTry]
-def elabDoTry := adaptMDoMacro fun x xs => do
-  let `(Term.doTry|try%$tk $x:doSeq $catches* $[$f?:doFinally]?) := x
-    | Macro.throwErrorAt x "ill-formed `do` try syntax"
-  withRef tk do
-  mkMDoJmp xs fun jmp => do
-  let x ← mkMDoSeqJmp x jmp
-  let x ← catches.foldlM (init := x) fun x c => do
-    match c with
-    | `(Term.doCatch|catch%$tk $e $[: $ty?]? => $c) => withRef tk do
-      let c ← mkMDoSeqJmp c jmp
-      if let some ty := ty? then
-        ``(HTryCatch.tryCatchThe $ty $x fun $e => $c)
-      else
-        ``(HTryCatch.tryCatchOut $x fun $e => $c)
-    | `(Term.doCatchMatch|catch%$tk $[$alts:matchAlt]*) => withRef tk do
-      let alts ← mkMDoMatchAlts alts jmp
-      ``(HTryCatch.tryCatchOut $x fun $[$alts:matchAlt]*)
-    | c => Macro.throwErrorAt c "ill-formed `do` catch syntax"
-  if let some f := f? then
-    let `(Term.doFinally|finally%$tk $f) := f
-      | Macro.throwErrorAt f "ill-formed `do` finally syntax"
-    let f ← mkMDoSeqJmp f jmp
-    withRef tk ``(TryFinally.tryFinally $x $f)
-  else
-    return x

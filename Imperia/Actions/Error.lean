@@ -49,27 +49,6 @@ abbrev setError [SetError ε μ] (e : ε) : μ :=
 abbrev setTheError (ε : Type u) [SetError ε μ] (e : ε) : μ :=
   setError e
 
-class TryCatch (ε : semiOutParam $ Type u) (μ : Type v) where
-  tryCatch : μ → (ε → μ) → μ
-
-instance [MonadTryCatch ε m] : TryCatch ε (m α) := ⟨MonadTryCatch.tryCatch⟩
-
-class HTryCatch (ε : semiOutParam $ Type u) (μ : Type v) (ξ : Type v) where
-  tryCatch : μ → (ε → ξ) → ξ
-
-@[default_instance] instance [TryCatch ε μ] : HTryCatch ε μ μ := ⟨TryCatch.tryCatch⟩
-
-abbrev HTryCatch.tryCatchThe (ε : Type u) [HTryCatch ε μ ξ] (x : μ) (f : ε → ξ) : ξ :=
-  HTryCatch.tryCatch (ε := ε) x f
-
-abbrev HTryCatch.tryCatchOut [ErrorOut μ ε] [HTryCatch ε μ ξ] (x : μ) (f : ε → ξ) : ξ :=
-  HTryCatch.tryCatch (ε := ε) x f
-
-class TryFinally (μ : Type v) where
-  tryFinally : μ → μ → μ
-
-instance [MonadFinally m] [Functor m] : TryFinally (m α) := ⟨tryFinally⟩
-
 /-! ## Unit Error -/
 
 class Failure (μ : Type v) where

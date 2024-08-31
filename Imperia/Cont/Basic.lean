@@ -125,17 +125,21 @@ instance [SetReturn α μ] : Ret α (Cont μ β) := ⟨Cont.ret⟩
 @[simp] theorem app_ret [SetReturn α μ] : (ret a : Cont μ β) k = setReturn a := rfl
 
 /-- Run the CPS monad, discarding the result and returning the underlying imperative. -/
-@[always_inline, inline, pp_nodot] def run' [Nop μ] (x : Cont μ α) : μ :=
+@[always_inline, inline, pp_nodot] abbrev run' [Nop μ] (x : Cont μ α) : μ :=
   x fun _ => nop
 
 instance [Nop μ] : Coe (Cont μ Unit) (Cont μ Empty) := ⟨(·.run')⟩
+
+/-- Run the CPS monad, returning the result through the underlying monad. -/
+@[always_inline, inline, pp_nodot] abbrev runM [Pure m] (x : Cont (m α) α) : m α :=
+  x pure
 
 /--
 Run `x` as independent imperative block.
 Control flow manipulation within `x` is restricted to the block.
 For instance, returns within `x` will be caught here and not halt the outer `Cont`.
 -/
-@[always_inline, inline]
+@[always_inline, inline, pp_nodot]
 def block [Coe μ (Cont μ α)] (x : Cont μ Empty) : Cont μ α :=
   ↑(run x)
 

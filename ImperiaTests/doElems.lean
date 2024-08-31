@@ -30,6 +30,7 @@ def checkKinds : CommandElabM Unit := do
 info: unimplemented kinds:
   Lean.Parser.Term.doReassign
   Lean.Parser.Term.doReassignArrow
+  Lean.Parser.Term.doTry
   Lean.Parser.Term.doLetRec
   Lean.Parser.Term.doAssert
   Lean.Parser.Term.doMatchExpr
@@ -52,6 +53,14 @@ info: macro kinds:
 #guard_msgs in run_cmd checkKinds
 
 /-! ## Test implemented `do` elements -/
+
+def μdoNested : Unit := μdo
+  μdo ← pure ()
+  μdo ← pure ()
+
+def doNested : Unit := μdo
+  do ← pure ()
+  do ← pure ()
 
 def doLet : Unit := μdo
   let _ := ← pure ()
@@ -124,8 +133,6 @@ def doRaiseVoid : Except Unit Unit := μdo
 def doRaiseNonterminal : Except Unit Unit := μdo
   raise
   raise
-
--- TODO: `doTry` test (requires fixes)
 
 /-! ## Test `do` macros -/
 
