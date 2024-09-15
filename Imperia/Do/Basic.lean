@@ -85,9 +85,47 @@ def mkMDoMatchAlts (alts : Array MatchAlt) (jmp : MDoJmp) : MacroM (Array MatchA
     | Macro.throwErrorAt alt "ill-formed `do` match alternative"
   `(Term.matchAltExpr| | $[$pats,*]|* => $(← mkMDoSeqJmp x jmp))
 
-/-! ## `μdo` Elab Attribute -/
+/-! ## `μdo` Extension -/
 
-open Elab
+structure OptScopes (α : Type u) where
+  currScope? : Option α := none
+  parentScopes : List α := []
+  deriving Inhabited
+
+abbrev OptScopes.hasScope (self : OptScopes α) : Bool :=
+  self.currScope?.isSome
+
+def OptScopes.push (scope : α) (self : OptScopes α) : OptScopes α :=
+  match self with
+  | ⟨none, ps⟩ => ⟨some scope, ps⟩
+  | ⟨some prev, ps⟩ => ⟨some scope, prev :: ps⟩
+
+def OptScopes.pop (self : OptScopes α) : OptScopes α :=
+  match self with
+  | ⟨_, []⟩ => ⟨none, []⟩
+  | ⟨_, prev::ps⟩ => ⟨some prev, ps⟩
+
+@[inline]
+def withNewExtScope
+  [Monad m] [MonadEnv m] [MonadFinally m]
+  (ext : EnvExtension (OptScopes α)) (x : m β) (scope : α := by exact {})
+: m β := do
+  modifyEnv (ext.modifyState · (·.push scope))
+  try
+    x
+  finally
+    modifyEnv (ext.modifyState · (·.pop))
+
+/-- The state of a `μdo` block. -/
+structure MDoState where
+  deriving Inhabited
+
+abbrev MDoScopes := OptScopes MDoState
+
+initialize μdoExt : EnvExtension MDoScopes ←
+  registerEnvExtension (pure {})
+
+/-! ## `μdo` Elab Attribute -/
 
 abbrev MDoElabM := TermElabM
 abbrev MDoElab := DoElem → Array DoElem → Option Expr → MDoElabM Expr
@@ -133,7 +171,8 @@ def elabMDoSeq : Term.TermElab := fun stx expectedType? => do
   let `(μdo% $x $xs:doElem*) := stx
     | throwErrorAt stx "ill-formed `μdo` sequence"
   let k := x.raw.getKind
-  withTraceNode `Elab.step (fun _ => return m!"expected type: {expectedType?}, μdo element\n{x}")
+  withTraceNode `Elab.step
+    (fun _ => return m!"expected type: {expectedType?}, μdo element '{k}'\n{x}")
     (tag := k.toString) do
   let env ← getEnv
   match μdoElabAttr.getEntries env k with
@@ -142,7 +181,7 @@ def elabMDoSeq : Term.TermElab := fun stx expectedType? => do
     match (← liftMacroM (expandMacroImpl? env x)) with
     | some (decl, xNew?) =>
       let xNew ← liftMacroM <| liftExcept xNew?
-      let stxNew ← `(μdo% $(⟨xNew⟩) $xs*)
+      let stxNew ← withRef stx `(μdo% $(⟨xNew⟩) $xs*)
       Term.withTermInfoContext' decl x (expectedType? := expectedType?) do
       Term.withMacroExpansion stx stxNew do
       withRef stxNew <| Term.elabTerm stxNew expectedType?
@@ -153,14 +192,27 @@ def elabMDoSeq : Term.TermElab := fun stx expectedType? => do
     elabMDoUsing (← saveState) x xs expectedType? elabFns
 
 @[inline]
-def adaptMDoMacro (f : DoElem → Array DoElem → MacroM Term) : MDoElab :=
-  fun x xs expectedType? => do
+def adaptMDoMacroElab
+  (f : DoElem → Array DoElem → MDoElabM Term)
+: MDoElab := fun x xs expectedType? => do
   let stx ← `(μdo% $x $xs*)
-  let exp ← liftMacroM do f x xs
+  let exp ← do f x xs
   Term.withMacroExpansion stx exp do
   Term.elabTerm exp expectedType?
 
+@[inline]
+def adaptMDoMacro (f : DoElem → Array DoElem → MacroM Term) : MDoElab :=
+  adaptMDoMacroElab fun x xs => liftMacroM do f x xs
+
 /-! ## `μdo` Implementation -/
 
-macro_rules
-| `(μdo $x) => do ``(Cont.run $(← mkMDoOfSeq x))
+@[term_elab termMDo] def elabMDo : Term.TermElab := fun stx expectedType? => do
+  let `(μdo $x) := stx
+    | throwErrorAt stx "ill-formed `μdo` syntax"
+  Term.tryPostponeIfNoneOrMVar expectedType?
+  let mu ← Meta.mkFreshTypeMVar MetavarKind.synthetic
+  if let some expectedType := expectedType? then
+    discard <| Meta.isDefEq expectedType mu
+  withNewExtScope μdoExt do
+  let x ← liftMacroM do ``(Cont.run $(← mkMDoOfSeq x))
+  Term.withMacroExpansion stx x <| Term.elabTerm x mu
