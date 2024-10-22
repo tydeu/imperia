@@ -7,8 +7,9 @@ import Imperia.Cont
 import Imperia.Util.Syntax
 import Imperia.Do.LiftMethod
 import Lean.Elab.Command
+import Lean.Elab.Do
 
-open Lean Parser Elab
+open Lean Elab Term.Do Parser
 
 namespace Imperia
 
@@ -23,87 +24,158 @@ scoped syntax:arg (name := μdoSeq) "μdo% " (ppLine doElem)+ : term
 
 /-! ## `μdo` Syntax Utilities -/
 
-def mkMDoOfSeq (x : DoSeq) : MacroM Term := do
-  withRef x ``(μdo% $(← expandDoSeq x)*)
+@[specialize]
+def mkMDoOfSeq [Monad m] [MonadQuotation m] (x : DoSeq) : m Term := do
+  withRef x ``(μdo% $(expandDoSeq x)*)
 
-def mkMDoOfElem (x : DoElem) : MacroM Term := do
+@[specialize]
+def mkMDoOfElem [Monad m] [MonadQuotation m] (x : DoElem) : m Term := do
   withRef x `(μdo% $x)
 
-def mkMDoOfElems (xs : Array DoElem) : MacroM Term := do
+@[specialize]
+def mkMDoOfElems [Monad m] [MonadQuotation m] (xs : Array DoElem) : m Term := do
   if h : xs.size > 0 then withRef xs[0] `(μdo% $xs*) else ``(nop)
 
 @[inline]
-def mkMDoBind (ref : Syntax) (val : Term) (body : MacroM Term) : MacroM Term :=
+def mkMDoBind
+  [Monad m] [MonadQuotation m]
+  (ref : Syntax) (val : Term) (body : m Term)
+: m Term :=
   withRef ref do `($val >>= $(← body))
 
-def mkMDoBindOfLifts (lifts : Array DoLift) (body : Term) : MacroM Term :=
+@[inline]
+def mkMDoBindOfLifts
+  [Monad m] [MonadQuotation m]
+  (lifts : Array DoLift) (body : Term)
+: m Term :=
   lifts.foldrM (init := body) fun {ref, id, val} body =>
     mkMDoBind ref val `(fun $id => $body)
 
-@[inline] def mkMDoTerm (stx : TSyntax ks) (mkBody : TSyntax ks → MacroM Term) : MacroM Term := do
+@[inline]
+def mkMDoTerm
+  [Monad m] [MonadQuotation m] [MonadMacroError m]
+  (stx : TSyntax ks) (mkBody : TSyntax ks → m Term)
+: m Term := do
   let (stx, lifts) ← expandLiftMethod stx
   let body ← mkBody ⟨stx⟩
   mkMDoBindOfLifts lifts body
 
-@[inline] def mkMDoTerms (xs : Array (TSyntax ks)) (mkBody : Array (TSyntax ks) → MacroM Term) : MacroM Term := do
+@[inline]
+def mkMDoTerms
+  [Monad m] [MonadQuotation m] [MonadMacroError m]
+  (xs : Array (TSyntax ks)) (mkBody : Array (TSyntax ks) → m Term)
+: m Term := do
   let (xs, lifts) ← StateT.run (s := #[]) <| xs.mapM fun stx =>
     (⟨.⟩) <$> expandLiftMethodM stx
   let body ← mkBody xs
   mkMDoBindOfLifts lifts body
 
-def mkMDoAndThen (x : Term) (xs : Array DoElem) : MacroM Term := do
+@[specialize]
+def mkMDoAndThen
+  [Monad m] [MonadQuotation m]
+  (x : Term) (xs : Array DoElem)
+: m Term := do
   if h : xs.size > 0 then
     mkMDoBind xs[0] x `(fun () => μdo% $xs*)
   else
     return x
 
+/-! ## `μdo` Jumps -/
+
 abbrev MDoJmp := Option Ident
 
-@[inline] def MDoJmp.mkTerm (jmp : MDoJmp) : MacroM Term :=
+@[inline]
+def MDoJmp.mkTerm [Monad m] [MonadQuotation m] (jmp : MDoJmp) : m Term :=
   if let some jmp := jmp then pure jmp else ``(nop)
 
+/-- Elaboration gadget for defining jumps. -/
+scoped syntax (name := μdoJump) "μdo_jump% " doElem* : term
+
 @[always_inline, inline]
-def mkMDoJmp (xs : Array DoElem) (f : MDoJmp → MacroM Term) : MacroM Term := do
+def mkMDoJmp
+  [Monad m] [MonadQuotation m]
+  (xs : Array DoElem) (f : MDoJmp → m Term)
+: m Term := do
   if h : xs.size > 0 then
     let jmp : Ident ← withRef xs[0] `(_μdo_jmp)
     let body ← f jmp
-    withRef xs[0]  `(let $jmp := μdo% $xs*; $body)
+    withRef xs[0]  `(let $jmp := μdo_jump% $xs*; $body)
   else
     f none
 
-@[inline]
-def mkMDoSeqJmp (x : DoSeq) (jmp : MDoJmp) : MacroM Term := do
-  let x ← mkMDoOfSeq x
-  if let some jmp := jmp then
-    mkMDoBind jmp x `(fun () => $jmp)
-  else
-    return x
+/-- Elaboration gadget for performing jumps. -/
+syntax μdoGoto := "μdo_goto% " ident
+attribute [scoped doElem_parser] μdoGoto
 
-def mkMDoMatchAlts (alts : Array MatchAlt) (jmp : MDoJmp) : MacroM (Array MatchAlt) := do
+/-- Elaboration gadget for creating a new `μdo` scope. -/
+scoped syntax:arg (name := μdoBranch) "μdo_branch% " (ppLine doElem)+ : term
+
+@[inline]
+def mkMDoBranch [Monad m] [MonadQuotation m] (x : DoSeq) (jmp : MDoJmp) : m Term := do
+  let xs := expandDoSeq x
+  if let some jmp := jmp then
+    let goto ← withRef jmp `(doElem|μdo_goto% $jmp)
+    if h : xs.size > 0 then
+      withRef xs[0] `(μdo_branch% $(xs.push goto)*)
+    else
+      withRef jmp `(μdo% $goto)
+  else
+    if h : xs.size > 0 then withRef xs[0] `(μdo_branch% $xs*) else ``(nop)
+
+@[inline]
+def mkMDo [Monad m] [MonadQuotation m] (x : DoSeq) (jmp : MDoJmp) : m Term := do
+  let xs := expandDoSeq x
+  if let some jmp := jmp then
+    let goto ← withRef jmp `(doElem|μdo_goto% $jmp)
+    if h : xs.size > 0 then
+      withRef xs[0] `(μdo_branch% $(xs.push goto)*)
+    else
+      withRef jmp `(μdo% $goto)
+  else
+    if h : xs.size > 0 then withRef xs[0] `(μdo_branch% $xs*) else ``(nop)
+
+@[specialize]
+def mkMDoMatchAlts
+  [Monad m] [MonadQuotation m] [MonadMacroError m]
+  (alts : Array MatchAlt) (jmp : MDoJmp)
+: m (Array MatchAlt) := do
   alts.mapM fun alt => do
   let `(doMatchAlt| | $[$pats,*]|* => $x) := alt
-    | Macro.throwErrorAt alt "ill-formed `do` match alternative"
-  `(Term.matchAltExpr| | $[$pats,*]|* => $(← mkMDoSeqJmp x jmp))
+    | MonadMacroError.throwAt alt "ill-formed `do` match alternative"
+  `(Term.matchAltExpr| | $[$pats,*]|* => $(← mkMDoBranch x jmp))
+
+@[inline]
+def checkTerminal
+  [Monad m] [MonadRef m] [MonadMacroError m]
+  (kind : String) (xs : Array DoElem)
+: m PUnit := do
+  if h : xs.size > 0 then
+    unless xs[0].raw.isOfKind ``μdoGoto do
+      MonadMacroError.throw s!"{kind} must be the last element in a `do` sequence"
 
 /-! ## `μdo` Extension -/
 
 structure OptScopes (α : Type u) where
-  currScope? : Option α := none
-  parentScopes : List α := []
+  stack : List α := []
   deriving Inhabited
 
+abbrev OptScopes.currScope? (self : OptScopes α) : Option α :=
+  self.stack.head?
+
 abbrev OptScopes.hasScope (self : OptScopes α) : Bool :=
-  self.currScope?.isSome
+  !self.stack.isEmpty
 
 def OptScopes.push (scope : α) (self : OptScopes α) : OptScopes α :=
-  match self with
-  | ⟨none, ps⟩ => ⟨some scope, ps⟩
-  | ⟨some prev, ps⟩ => ⟨some scope, prev :: ps⟩
+  {self with stack := scope :: self.stack}
 
 def OptScopes.pop (self : OptScopes α) : OptScopes α :=
-  match self with
-  | ⟨_, []⟩ => ⟨none, []⟩
-  | ⟨_, prev::ps⟩ => ⟨some prev, ps⟩
+  {self with stack := self.stack.tail}
+
+@[inline] def OptScopes.modify (f : α → α) (self : OptScopes α) : OptScopes α :=
+  {self with stack := match self.stack with | s :: xs => f s :: xs | [] => []}
+
+abbrev OptScopes.any (f : α → Bool) (self : OptScopes α) : Bool :=
+  self.stack.any f
 
 @[inline]
 def withNewExtScope
@@ -117,13 +189,39 @@ def withNewExtScope
     modifyEnv (ext.modifyState · (·.pop))
 
 /-- The state of a `μdo` block. -/
-structure MDoState where
+structure MDoScope where
+  /-- Mutable variables. -/
+  vars : List Name := {}
   deriving Inhabited
 
-abbrev MDoScopes := OptScopes MDoState
+abbrev MDoScopes := OptScopes MDoScope
 
 initialize μdoExt : EnvExtension MDoScopes ←
   registerEnvExtension (pure {})
+
+@[inline] def MDoScope.modifyVars (f : List Name → List Name) (self : MDoScope) : MDoScope :=
+  {self with vars := f self.vars}
+
+@[inline]
+def withNewMDoScope
+  [Monad m] [MonadEnv m] [MonadFinally m]
+  (x : m α) (scope : MDoScope := by exact {})
+: m α := do
+  withNewExtScope μdoExt x scope
+
+@[inline]
+def getMDoScopes [Functor m] [MonadEnv m] : m MDoScopes :=
+  μdoExt.getState <$> getEnv
+
+@[inline]
+def getMDoScope [Monad m] [MonadEnv m] [MonadError m] : m MDoScope := do
+  let some scope := (← getMDoScopes).currScope?
+    | throwError "accessed `μdo` state outside a `μdo` block"
+  return scope
+
+@[inline]
+def modifyMDoScope [MonadEnv m] (f : MDoScope → MDoScope) : m PUnit :=
+  modifyEnv (μdoExt.modifyState · (·.modify f))
 
 /-! ## `μdo` Elab Attribute -/
 
@@ -132,6 +230,10 @@ abbrev MDoElab := DoElem → Array DoElem → Option Expr → MDoElabM Expr
 
 initialize μdoElabAttr : KeyedDeclsAttribute MDoElab ←
   unsafe mkElabAttribute MDoElab `builtin_μdo_elab `μdo_elab `Lean.Parser.Term ``MDoElab "μdo"
+
+instance : MonadMacroError MDoElabM where
+  throwAt' ref msg := throw (.error ref msg)
+  throwUnsupported := throwUnsupportedSyntax
 
 def elabMDoError
   (x : DoElem) (xs : Array DoElem)
@@ -166,10 +268,10 @@ def elabMDoUsing
     elabMDoError x xs expectedType?
       m!"`μdo` elaborator(s) were unable to process the do element syntax{indentD x}"
 
-@[term_elab μdoSeq]
-def elabMDoSeq : Term.TermElab := fun stx expectedType? => do
-  let `(μdo% $x $xs:doElem*) := stx
-    | throwErrorAt stx "ill-formed `μdo` sequence"
+partial def elabMDoSeqCore
+  (x : DoElem) (xs : Array DoElem) (expectedType? : Option Expr)
+: TermElabM Expr := do
+  withRef x do
   let k := x.raw.getKind
   withTraceNode `Elab.step
     (fun _ => return m!"expected type: {expectedType?}, μdo element '{k}'\n{x}")
@@ -181,22 +283,35 @@ def elabMDoSeq : Term.TermElab := fun stx expectedType? => do
     match (← liftMacroM (expandMacroImpl? env x)) with
     | some (decl, xNew?) =>
       let xNew ← liftMacroM <| liftExcept xNew?
-      let stxNew ← withRef stx `(μdo% $(⟨xNew⟩) $xs*)
       Term.withTermInfoContext' decl x (expectedType? := expectedType?) do
-      Term.withMacroExpansion stx stxNew do
-      withRef stxNew <| Term.elabTerm stxNew expectedType?
+      Term.withMacroExpansion x xNew do
+      elabMDoSeqCore ⟨xNew⟩ xs expectedType?
     | _ =>
       elabMDoError x xs expectedType?
         m!"do element `{mkConst k}` has not been implemented for `μdo`"
   | elabFns =>
     elabMDoUsing (← saveState) x xs expectedType? elabFns
 
+def elabMDoElems
+  (xs : Array DoElem) (expectedType? : Option Expr)
+: TermElabM Expr := do
+  if h : 0 < xs.size then
+    elabMDoSeqCore xs[0] xs[1:] expectedType?
+  else
+    Term.elabTerm (← ``(nop)) expectedType?
+
+@[term_elab μdoSeq]
+def elabMDoSeq : Term.TermElab := fun stx expectedType? => do
+  let `(μdo% $xs:doElem*) := stx
+    | throwErrorAt stx "ill-formed `μdo` sequence"
+  elabMDoElems xs expectedType?
+
 @[inline]
 def adaptMDoMacroElab
   (f : DoElem → Array DoElem → MDoElabM Term)
 : MDoElab := fun x xs expectedType? => do
   let stx ← `(μdo% $x $xs*)
-  let exp ← do f x xs
+  let exp ← f x xs
   Term.withMacroExpansion stx exp do
   Term.elabTerm exp expectedType?
 
@@ -213,6 +328,75 @@ def adaptMDoMacro (f : DoElem → Array DoElem → MacroM Term) : MDoElab :=
   let mu ← Meta.mkFreshTypeMVar MetavarKind.synthetic
   if let some expectedType := expectedType? then
     discard <| Meta.isDefEq expectedType mu
-  withNewExtScope μdoExt do
-  let x ← liftMacroM do ``(Cont.run $(← mkMDoOfSeq x))
+  withNewMDoScope do
+  let x ← ``(Cont.run $(← mkMDoOfSeq x))
   Term.withMacroExpansion stx x <| Term.elabTerm x mu
+
+set_option trace.compiler.ir.result true in
+@[term_elab μdoBranch] def elabMDoBranch : Term.TermElab := fun stx expectedType? => do
+  let `(μdo_branch% $xs*) := stx
+    | throwErrorAt stx "ill-formed `μdo_branch%` syntax"
+  withNewMDoScope do
+  elabMDoElems xs expectedType?
+
+/-! ## `μdo` Mutable Variable Helpers -/
+
+@[inline]
+def MDoScopes.hasVar (x : Name) (self : MDoScopes ): Bool :=
+  self.any (·.vars.contains x)
+
+@[inline]
+def registerMDoVar (id : Ident) : MDoElabM PUnit := do
+  modifyMDoScope (·.modifyVars (·.insert id.getId))
+
+@[inline]
+def unregisterMDoVar (id : Ident) : MDoElabM PUnit := do
+  -- FIXME: does not consider parent scopes
+  modifyMDoScope (·.modifyVars (·.erase id.getId))
+
+def declareMDoVar (var : Ident) (mutable : Bool) : MDoElabM PUnit :=
+  if mutable then registerMDoVar var else unregisterMDoVar var
+
+def declareMDoVars (vars : Array Var) (mutable : Bool) : MDoElabM PUnit := do
+  if mutable then
+    vars.forM fun var => registerMDoVar ⟨var⟩
+  else
+    vars.forM fun var => unregisterMDoVar ⟨var⟩
+
+def throwNotReassignable (x : Name) : MDoElabM PUnit :=
+  throwError "`{x.simpMacroScopes}` cannot be mutated, \
+    only variables declared using `let mut` can be mutated. \
+    If you did not intend to mutate but define `{x.simpMacroScopes}`, \
+    consider using `let {x.simpMacroScopes}` instead."
+
+def checkMDoVarReassignable (x : Name) : MDoElabM PUnit := do
+  unless (← getMDoScopes).hasVar x do throwNotReassignable x
+
+def checkMDoVarsReassignable (vars : Array Var) : MDoElabM PUnit := do
+  let scopes := (← getMDoScopes)
+  vars.forM fun x => do
+    unless scopes.hasVar x.getId do
+      throwNotReassignable x.getId
+
+def MDoScopes.abstractVars (self : MDoScopes) (x : Term) : MDoElabM Term := do
+  let vs := self.stack.foldl (init := #[]) fun vs scope =>
+    scope.vars.foldl (init := vs) fun vs var => vs.push (mkIdent var)
+  withRef x `(fun $vs* => $x)
+
+@[inline] def abstractMDoVars (x : Term) : MDoElabM Term := do
+  (← getMDoScopes).abstractVars x
+
+def MDoScopes.applyVars (self : MDoScopes) (x : Term) : MDoElabM Term := do
+  withRef x do
+  self.stack.foldlM (init := x) fun x scope => do
+    scope.vars.foldlM (init := x) fun x var => do
+      `($x $(mkIdent var))
+
+@[inline] def applyMDoVars (x : Term) : MDoElabM Term := do
+  MDoScopes.applyVars ((← getMDoScopes).pop) x
+
+@[term_elab μdoJump]
+def elabMDoJump : Term.TermElab := fun x expectedType? => do
+  let `(μdoJump|μdo_jump% $xs*) := x
+    | throwErrorAt x "ill-formed `μdo_jump%` syntax"
+  Term.elabTerm (← abstractMDoVars <| ← `(μdo% $xs*)) expectedType?

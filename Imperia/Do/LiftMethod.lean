@@ -4,6 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Mac Malone
 -/
 import Lean.Parser.Do
+import Imperia.Util.MonadMacroError
 
 /-! ## Lift Method
 
@@ -76,15 +77,22 @@ structure DoLift where
   val : Term
   deriving BEq
 
+
+variable [Monad m] [MonadQuotation m] [MonadMacroError m]
+
 variable (baseId : Name) in
-partial def expandLiftMethodAux (inQuot : Bool) (inBinder : Bool) : Syntax → StateT (Array DoLift) MacroM Syntax
+@[specialize] partial def expandLiftMethodAux
+  (inQuot : Bool) (inBinder : Bool)
+: Syntax → StateT (Array DoLift) m Syntax
   | stx@(Syntax.node i k args) =>
     if k == choiceKind then do
       -- choice node: check that lifts are consistent
       let alts ← stx.getArgs.mapM (expandLiftMethodAux inQuot inBinder · |>.run #[])
       let (_, lifts) := alts[0]!
       unless alts.all (·.2 == lifts) do
-        Macro.throwErrorAt stx "cannot lift `(<- ...)` over inconsistent syntax variants, consider lifting out the binding manually"
+        MonadMacroError.throwAt stx "\
+          cannot lift `(<- ...)` over inconsistent syntax variants, \
+          consider lifting out the binding manually"
       modify (· ++ lifts)
       return .node i k (alts.map (·.1))
     else if liftMethodDelimiter k then
@@ -97,7 +105,11 @@ partial def expandLiftMethodAux (inQuot : Bool) (inBinder : Bool) : Syntax → S
       return Syntax.node i k args
     else if k == ``Parser.Term.liftMethod && !inQuot then withFreshMacroScope do
       if inBinder then
-        Macro.throwErrorAt stx "cannot lift `(<- ...)` over a binder, this error usually happens when you are trying to lift a method nested in a `fun`, `let`, or `match`-alternative, and it can often be fixed by adding a missing `do`"
+        MonadMacroError.throwAt stx "\
+          cannot lift `(<- ...)` over a binder, \
+          this error usually happens when you are trying to lift a method nested \
+          in a `fun`, `let`, or `match`-alternative, and it can often be fixed by \
+          adding a missing `do`"
       let ref := args[0]!
       let term := args[1]!
       let term  ← expandLiftMethodAux inQuot inBinder term
@@ -112,12 +124,14 @@ partial def expandLiftMethodAux (inQuot : Bool) (inBinder : Bool) : Syntax → S
       return Syntax.node i k args
   | stx => return stx
 
-def expandLiftMethodM (stx : Syntax) : StateT (Array DoLift) MacroM Syntax := do
+@[specialize]
+def expandLiftMethodM (stx : Syntax) : StateT (Array DoLift) m Syntax := do
   if !hasLiftMethod stx then
     return stx
   else
     let baseId ← withFreshMacroScope (MonadQuotation.addMacroScope `_μdo_lift)
     expandLiftMethodAux baseId false false stx
 
-def expandLiftMethod (stx : Syntax) : MacroM (Syntax × Array DoLift) := do
+@[inline]
+def expandLiftMethod (stx : Syntax) : m (Syntax × Array DoLift) := do
   expandLiftMethodM stx |>.run #[]

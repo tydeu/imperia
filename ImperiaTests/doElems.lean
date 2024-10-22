@@ -28,17 +28,15 @@ def checkKinds : CommandElabM Unit := do
 
 /--
 info: unimplemented kinds:
-  Lean.Parser.Term.doReassign
-  Lean.Parser.Term.doReassignArrow
   Lean.Parser.Term.doTry
   Lean.Parser.Term.doLetRec
   Lean.Parser.Term.doAssert
   Lean.Parser.Term.doMatchExpr
   Lean.Parser.Term.doHave
   Lean.Parser.Term.doLetMetaExpr
-  Lean.Parser.Term.doBreak
-  Lean.Parser.Term.doFor
   Lean.Parser.Term.doLetExpr
+  Lean.Parser.Term.doFor
+  Lean.Parser.Term.doBreak
   Lean.Parser.Term.doContinue
   Lean.Parser.Term.doDbgTrace
 ---
@@ -69,13 +67,77 @@ def doLet : Unit := μdo
   let _ ← pure ()
   ()
 
-/-- error: `mut` has not been implemented for `μdo` -/
-#guard_msgs in
 def doLetMut : Unit := μdo
   let mut _ := ← pure ()
   let mut 0 := ← pure 1
     | ← pure ()
   let mut _ ← pure ()
+  ()
+
+-- FIXME: Mutable declaration of `x` should not leak into RHS
+def doLetLeak : Nat := Id.run μdo
+  let mut x ← do
+    x := 1
+    pure x
+  return x
+
+def doReassign : Unit := μdo
+  _ := ()
+  0 ← pure 1
+    | ← pure ()
+  _ ← pure ""
+  ()
+
+/--
+error: `x` cannot be mutated,
+only variables declared using `let mut` can be mutated.
+If you did not intend to mutate but define `x`, consider using `let x` instead.
+-/
+#guard_msgs in
+def doReassignCheck : Unit := μdo
+  x := ()
+
+/--
+error: `x` cannot be mutated,
+only variables declared using `let mut` can be mutated.
+If you did not intend to mutate but define `x`, consider using `let x` instead.
+-/
+#guard_msgs in
+def doReassignArrowCheck : Unit := μdo
+  x ← ()
+
+set_option linter.unusedVariables false in
+def doIfReassign (toggle : Bool) : String := Id.run μdo
+  let mut x := "foo"
+  if toggle then
+    x := "bar"
+  else
+    x := "baz"
+  return x
+
+example : doIfReassign true = "bar" := rfl
+example : doIfReassign false = "baz" := rfl
+
+/--
+info: μdo scopes:
+  · mutable vars: [y]
+  · mutable vars: [x]
+---
+info: μdo scopes:
+  · mutable vars: [z]
+  · mutable vars: [x]
+-/
+#guard_msgs in
+set_option linter.unusedVariables false in
+/-- Tests that branch mutable variables are not applied to the join point. -/
+def doIfLetMut (toggle : Bool) : Unit := μdo
+  let mut x := "foo"
+  if toggle then
+    let mut y := "bar"
+    μdo_scopes%
+  else
+    let mut z := "baz"
+    μdo_scopes%
   ()
 
 def doMatch : Unit := μdo
@@ -121,6 +183,25 @@ def doReturnVoid : Unit := μdo
 def doReturnNonterminal : Unit := μdo
   return
   return
+
+/-- Tests that jumps do not produce non-terminal `return` errors. -/
+def doIfReturn (toggle : Bool) : String := Id.run μdo
+  if toggle then
+    return "bar"
+  else
+    pure ()
+  return "baz"
+
+example : doIfReturn true = "bar" := rfl
+example : doIfReturn false = "baz" := rfl
+
+-- FIXME: Produce a nicer error message on the orphaned jump
+def doIfOrphan (toggle : Bool) : String := Id.run μdo
+  if toggle then
+    return "bar"
+  else
+    return "baz"
+  (return "foo" : Id String) -- No type inference due to no use of the jump
 
 def doRaise : Except Nat Unit := μdo
   raise 0
