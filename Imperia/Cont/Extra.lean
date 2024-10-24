@@ -39,6 +39,3 @@ instance [SetError ε μ] : SetError ε (Cont μ Empty) where
 
 instance [SetError ε μ] [AndThen μ] : SetError ε (Cont μ Unit) where
   setError e := lift (setError e)
-
-instance [Failure μ] : MonadFailure (Cont μ) where
-  failure := exec failure

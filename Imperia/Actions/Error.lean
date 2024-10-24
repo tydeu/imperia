@@ -11,6 +11,8 @@ namespace Imperia
 /-- Auxiliary class for inferring the errpr type of imperatives. -/
 class ErrorOut (ε : outParam $ Type u) (μ : Type v)
 
+instance [MonadExcept ε m] : ErrorOut ε (m PUnit) where
+
 class MonadThrow (ε : semiOutParam $ Type u) (m : Type v → Type w) where
   throw : ε → m α
 
@@ -29,14 +31,14 @@ instance [MonadThrow ε m] [MonadTryCatch ε m] : MonadExceptOf ε m where
   throw := MonadThrow.throw
   tryCatch := MonadTryCatch.tryCatch
 
-instance [MonadExcept ε m] : ErrorOut ε (m PUnit) where
-
 /-! ## Imperative Error -/
 
 class Throw (ε : semiOutParam $ Type u) (μ : Type v) where
   throw (e : ε) : μ
 
 instance [MonadThrow ε m] : Throw ε (m α) := ⟨MonadThrow.throw⟩
+
+instance (priority := low) [Throw ε μ] : ErrorOut ε μ where
 
 class SetError (ε : semiOutParam $ Type u) (μ : Type v) where
   setError (e : ε) : μ
@@ -51,30 +53,15 @@ abbrev setTheError (ε : Type u) [SetError ε μ] (e : ε) : μ :=
 
 /-! ## Unit Error -/
 
-class Failure (μ : Type v) where
-  failure : μ
+instance [MonadTryCatch PUnit m] : OrElse (m α) := ⟨MonadTryCatch.tryCatch⟩
 
-instance (priority := low) [Failure μ] : Throw Unit μ := ⟨fun _ => Failure.failure⟩
+instance (priority := low) [Alternative m] : MonadExceptOf PUnit m where
+  throw _ := Alternative.failure
+  tryCatch := Alternative.orElse
 
-class MonadFailure (m : Type u → Type v) where
-  failure : m α
-
-instance [MonadFailure m] : Failure (m α) := ⟨MonadFailure.failure⟩
-instance [Alternative m] : MonadFailure m := ⟨failure⟩
-
-export Failure (failure)
-
-class MonadOrElse (m : Type u → Type v) where
-  orElse : m α → (Unit → m α) → m α
-
-instance [MonadOrElse m] : OrElse (m α) := ⟨MonadOrElse.orElse⟩
-instance [Alternative m] : MonadOrElse m := ⟨Alternative.orElse⟩
-
-instance
-  [Pure m] [Seq m] [SeqLeft m] [SeqRight m] [MonadFailure m] [MonadOrElse m]
-: Alternative m where
-  failure := MonadFailure.failure
-  orElse := MonadOrElse.orElse
+instance (priority := low) [Applicative m] [MonadExceptOf PUnit m] : Alternative m where
+  failure := throw ()
+  orElse := tryCatch
 
 /-! ## Syntax Sugar -/
 
