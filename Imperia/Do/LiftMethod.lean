@@ -4,7 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Mac Malone
 -/
 import Lean.Parser.Do
-import Imperia.Util.MonadMacroError
+import Imperia.Actions.Error
 
 /-! ## Lift Method
 
@@ -77,20 +77,21 @@ structure DoLift where
   val : Term
   deriving BEq
 
-
-variable [Monad m] [MonadQuotation m] [MonadMacroError m]
+variable [Monad m] [MonadQuotation m] [MonadThrow String m]
 
 variable (baseId : Name) in
 @[specialize] partial def expandLiftMethodAux
-  (inQuot : Bool) (inBinder : Bool)
-: Syntax → StateT (Array DoLift) m Syntax
-  | stx@(Syntax.node i k args) =>
-    if k == choiceKind then do
+  (inQuot : Bool) (inBinder : Bool) (stx : Syntax)
+: StateT (Array DoLift) m Syntax := do
+  match stx with
+  | .node i k args =>
+    if k == choiceKind then
       -- choice node: check that lifts are consistent
-      let alts ← stx.getArgs.mapM (expandLiftMethodAux inQuot inBinder · |>.run #[])
+      let alts ← stx.getArgs.mapM fun alt =>
+        expandLiftMethodAux inQuot inBinder alt |>.run #[]
       let (_, lifts) := alts[0]!
       unless alts.all (·.2 == lifts) do
-        MonadMacroError.throwAt stx "\
+        throwAt stx "\
           cannot lift `(<- ...)` over inconsistent syntax variants, \
           consider lifting out the binding manually"
       modify (· ++ lifts)
@@ -105,7 +106,7 @@ variable (baseId : Name) in
       return Syntax.node i k args
     else if k == ``Parser.Term.liftMethod && !inQuot then withFreshMacroScope do
       if inBinder then
-        MonadMacroError.throwAt stx "\
+        throwAt stx "\
           cannot lift `(<- ...)` over a binder, \
           this error usually happens when you are trying to lift a method nested \
           in a `fun`, `let`, or `match`-alternative, and it can often be fixed by \
@@ -120,7 +121,8 @@ variable (baseId : Name) in
     else do
       let inAntiquot := stx.isAntiquot && !stx.isEscapedAntiquot
       let inBinder   := inBinder || (!inQuot && liftMethodForbiddenBinder stx)
-      let args ← args.mapM (expandLiftMethodAux (inQuot && !inAntiquot || stx.isQuot) inBinder)
+      let args ← args.mapM fun arg =>
+        expandLiftMethodAux (inQuot && !inAntiquot || stx.isQuot) inBinder arg
       return Syntax.node i k args
   | stx => return stx
 

@@ -4,6 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Mac Malone
 -/
 import Imperia.Cont
+import Imperia.Util.Elab
 import Imperia.Util.Syntax
 import Imperia.Do.LiftMethod
 import Lean.Elab.Command
@@ -24,15 +25,19 @@ scoped syntax:arg (name := μdoSeq) "μdo% " (ppLine doElem)+ : term
 
 /-! ## `μdo` Syntax Utilities -/
 
-@[specialize]
+@[inline]
+def mkMDoSeq [Monad m] [MonadQuotation m] (x : DoElem) (xs : Array DoElem) : m Term := do
+  withRef x `(μdo% $x $xs*)
+
+@[inline]
 def mkMDoOfSeq [Monad m] [MonadQuotation m] (x : DoSeq) : m Term := do
   withRef x ``(μdo% $(expandDoSeq x)*)
 
-@[specialize]
+@[inline]
 def mkMDoOfElem [Monad m] [MonadQuotation m] (x : DoElem) : m Term := do
   withRef x `(μdo% $x)
 
-@[specialize]
+@[inline]
 def mkMDoOfElems [Monad m] [MonadQuotation m] (xs : Array DoElem) : m Term := do
   if h : xs.size > 0 then withRef xs[0] `(μdo% $xs*) else ``(nop)
 
@@ -53,7 +58,7 @@ def mkMDoBindOfLifts
 
 @[inline]
 def mkMDoTerm
-  [Monad m] [MonadQuotation m] [MonadMacroError m]
+  [Monad m] [MonadQuotation m] [MonadThrow String m]
   (stx : TSyntax ks) (mkBody : TSyntax ks → m Term)
 : m Term := do
   let (stx, lifts) ← expandLiftMethod stx
@@ -62,7 +67,7 @@ def mkMDoTerm
 
 @[inline]
 def mkMDoTerms
-  [Monad m] [MonadQuotation m] [MonadMacroError m]
+  [Monad m] [MonadQuotation m] [MonadThrow String m]
   (xs : Array (TSyntax ks)) (mkBody : Array (TSyntax ks) → m Term)
 : m Term := do
   let (xs, lifts) ← StateT.run (s := #[]) <| xs.mapM fun stx =>
@@ -136,22 +141,22 @@ def mkMDo [Monad m] [MonadQuotation m] (x : DoSeq) (jmp : MDoJmp) : m Term := do
 
 @[specialize]
 def mkMDoMatchAlts
-  [Monad m] [MonadQuotation m] [MonadMacroError m]
+  [Monad m] [MonadQuotation m] [MonadThrow String m]
   (alts : Array MatchAlt) (jmp : MDoJmp)
 : m (Array MatchAlt) := do
-  alts.mapM fun alt => do
+  alts.mapM fun alt => withRef alt do
   let `(doMatchAlt| | $[$pats,*]|* => $x) := alt
-    | MonadMacroError.throwAt alt "ill-formed `do` match alternative"
+    | raise "ill-formed `do` match alternative"
   `(Term.matchAltExpr| | $[$pats,*]|* => $(← mkMDoBranch x jmp))
 
 @[inline]
 def checkTerminal
-  [Monad m] [MonadRef m] [MonadMacroError m]
+  [Monad m] [MonadRef m] [MonadThrow String m]
   (kind : String) (xs : Array DoElem)
 : m PUnit := do
   if h : xs.size > 0 then
     unless xs[0].raw.isOfKind ``μdoGoto do
-      MonadMacroError.throw s!"{kind} must be the last element in a `do` sequence"
+      raise s!"{kind} must be the last element in a `do` sequence"
 
 /-! ## `μdo` Extension -/
 
@@ -216,7 +221,7 @@ def getMDoScopes [Functor m] [MonadEnv m] : m MDoScopes :=
 @[inline]
 def getMDoScope [Monad m] [MonadEnv m] [MonadError m] : m MDoScope := do
   let some scope := (← getMDoScopes).currScope?
-    | throwError "accessed `μdo` state outside a `μdo` block"
+    | raise "accessed `μdo` state outside a `μdo` block"
   return scope
 
 @[inline]
@@ -231,10 +236,6 @@ abbrev MDoElab := DoElem → Array DoElem → Option Expr → MDoElabM Expr
 initialize μdoElabAttr : KeyedDeclsAttribute MDoElab ←
   unsafe mkElabAttribute MDoElab `builtin_μdo_elab `μdo_elab `Lean.Parser.Term ``MDoElab "μdo"
 
-instance : MonadMacroError MDoElabM where
-  throwAt' ref msg := throw (.error ref msg)
-  throwUnsupported := throwUnsupportedSyntax
-
 def elabMDoError
   (x : DoElem) (xs : Array DoElem)
   (expectedType? : Option Expr) (errMsg : MessageData)
@@ -244,7 +245,7 @@ def elabMDoError
     let x ← withRef xs[0] `(μdo% $xs*)
     Term.elabTerm x expectedType?
   else
-    throwErrorAt x errMsg
+    throwAt x errMsg
 
 def elabMDoUsing
   (s : Term.SavedState)
@@ -268,7 +269,7 @@ def elabMDoUsing
     elabMDoError x xs expectedType?
       m!"`μdo` elaborator(s) were unable to process the do element syntax{indentD x}"
 
-partial def elabMDoSeqCore
+partial def elabMDoCore
   (x : DoElem) (xs : Array DoElem) (expectedType? : Option Expr)
 : TermElabM Expr := do
   withRef x do
@@ -285,7 +286,7 @@ partial def elabMDoSeqCore
       let xNew ← liftMacroM <| liftExcept xNew?
       Term.withTermInfoContext' decl x (expectedType? := expectedType?) do
       Term.withMacroExpansion x xNew do
-      elabMDoSeqCore ⟨xNew⟩ xs expectedType?
+      elabMDoCore ⟨xNew⟩ xs expectedType?
     | _ =>
       elabMDoError x xs expectedType?
         m!"do element `{mkConst k}` has not been implemented for `μdo`"
@@ -296,21 +297,21 @@ def elabMDoElems
   (xs : Array DoElem) (expectedType? : Option Expr)
 : TermElabM Expr := do
   if h : 0 < xs.size then
-    elabMDoSeqCore xs[0] xs[1:] expectedType?
+    elabMDoCore xs[0] xs[1:] expectedType?
   else
     Term.elabTerm (← ``(nop)) expectedType?
 
 @[term_elab μdoSeq]
 def elabMDoSeq : Term.TermElab := fun stx expectedType? => do
   let `(μdo% $xs:doElem*) := stx
-    | throwErrorAt stx "ill-formed `μdo` sequence"
+    | throwAt stx "ill-formed `μdo` sequence"
   elabMDoElems xs expectedType?
 
 @[inline]
 def adaptMDoMacroElab
   (f : DoElem → Array DoElem → MDoElabM Term)
 : MDoElab := fun x xs expectedType? => do
-  let stx ← `(μdo% $x $xs*)
+  let stx ← mkMDoSeq x xs
   let exp ← f x xs
   Term.withMacroExpansion stx exp do
   Term.elabTerm exp expectedType?
@@ -323,7 +324,7 @@ def adaptMDoMacro (f : DoElem → Array DoElem → MacroM Term) : MDoElab :=
 
 @[term_elab termMDo] def elabMDo : Term.TermElab := fun stx expectedType? => do
   let `(μdo $x) := stx
-    | throwErrorAt stx "ill-formed `μdo` syntax"
+    | throwAt stx "ill-formed `μdo` syntax"
   Term.tryPostponeIfNoneOrMVar expectedType?
   let mu ← Meta.mkFreshTypeMVar MetavarKind.synthetic
   if let some expectedType := expectedType? then
@@ -332,10 +333,9 @@ def adaptMDoMacro (f : DoElem → Array DoElem → MacroM Term) : MDoElab :=
   let x ← ``(Cont.run $(← mkMDoOfSeq x))
   Term.withMacroExpansion stx x <| Term.elabTerm x mu
 
-set_option trace.compiler.ir.result true in
 @[term_elab μdoBranch] def elabMDoBranch : Term.TermElab := fun stx expectedType? => do
   let `(μdo_branch% $xs*) := stx
-    | throwErrorAt stx "ill-formed `μdo_branch%` syntax"
+    | throwAt stx "ill-formed `μdo_branch%` syntax"
   withNewMDoScope do
   elabMDoElems xs expectedType?
 
@@ -363,20 +363,20 @@ def declareMDoVars (vars : Array Var) (mutable : Bool) : MDoElabM PUnit := do
   else
     vars.forM fun var => unregisterMDoVar ⟨var⟩
 
-def throwNotReassignable (x : Name) : MDoElabM PUnit :=
-  throwError "`{x.simpMacroScopes}` cannot be mutated, \
-    only variables declared using `let mut` can be mutated. \
-    If you did not intend to mutate but define `{x.simpMacroScopes}`, \
-    consider using `let {x.simpMacroScopes}` instead."
+def notReassignable (x : Name) : MessageData :=
+  m!"`{x.simpMacroScopes}` cannot be mutated, \
+  only variables declared using `let mut` can be mutated. \
+  If you did not intend to mutate but define `{x.simpMacroScopes}`, \
+  consider using `let {x.simpMacroScopes}` instead."
 
 def checkMDoVarReassignable (x : Name) : MDoElabM PUnit := do
-  unless (← getMDoScopes).hasVar x do throwNotReassignable x
+  unless (← getMDoScopes).hasVar x do raise (notReassignable x)
 
 def checkMDoVarsReassignable (vars : Array Var) : MDoElabM PUnit := do
-  let scopes := (← getMDoScopes)
+  let scopes ← getMDoScopes
   vars.forM fun x => do
     unless scopes.hasVar x.getId do
-      throwNotReassignable x.getId
+      raise (notReassignable x.getId)
 
 def MDoScopes.abstractVars (self : MDoScopes) (x : Term) : MDoElabM Term := do
   let vs := self.stack.foldl (init := #[]) fun vs scope =>
@@ -398,5 +398,5 @@ def MDoScopes.applyVars (self : MDoScopes) (x : Term) : MDoElabM Term := do
 @[term_elab μdoJump]
 def elabMDoJump : Term.TermElab := fun x expectedType? => do
   let `(μdoJump|μdo_jump% $xs*) := x
-    | throwErrorAt x "ill-formed `μdo_jump%` syntax"
+    | throwAt x "ill-formed `μdo_jump%` syntax"
   Term.elabTerm (← abstractMDoVars <| ← `(μdo% $xs*)) expectedType?

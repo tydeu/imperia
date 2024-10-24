@@ -5,7 +5,6 @@ Authors: Mac Malone
 -/
 import Lean.Parser
 import Imperia.Cont
-import Imperia.Util.MonadMacroError
 
 open Lean Parser Elab
 

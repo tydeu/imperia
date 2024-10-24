@@ -16,6 +16,12 @@ class MonadThrow (ε : semiOutParam $ Type u) (m : Type v → Type w) where
 
 instance (priority := low) [MonadThrow ε m] : MonadErrorOut ε m where
 
+instance [MonadLift m n] [MonadThrow ε m] : MonadThrow ε n where
+  throw e := liftM (m := m) (MonadThrow.throw e)
+
+instance (priority := low) [MonadThrow α m] [Coe β α] : MonadThrow β m where
+  throw b := MonadThrow.throw (ε := α) b
+
 class MonadTryCatch (ε : semiOutParam $ Type u) (m : Type v → Type w) where
   tryCatch : m α → (ε → m α) → m α
 
@@ -42,6 +48,13 @@ class Throw (ε : semiOutParam $ Type u) (μ : Type v) where
 instance [MonadThrow ε m] : Throw ε (m α) := ⟨MonadThrow.throw⟩
 
 instance (priority := low) [Throw ε μ] : ErrorOut ε μ := {}
+
+/-- Like `throw`, but with `ε` explicit. -/
+abbrev throwThe (ε : Type u) [Throw ε μ] (e : ε) : μ :=
+  Throw.throw e
+
+instance (priority := low) [Throw α μ] [Coe β α] : Throw β μ where
+  throw b := Throw.throw (ε := α) b
 
 class SetError (ε : semiOutParam $ Type u) (μ : Type v) where
   setError (e : ε) : μ
@@ -77,6 +90,25 @@ instance (priority := mid) [Alternative m] : MonadThrow Unit m := ⟨fun _ => Al
 instance (priority := mid) [Applicative m] [MonadThrow Unit m] [MonadOrElse m] : Alternative m where
   failure := MonadThrow.throw ()
   orElse := MonadOrElse.orElse
+
+/-! ## Lean Errors -/
+
+section
+open Lean
+
+/-- Throw an error with the given location information. -/
+@[inline] def throwAt [Monad m] [MonadRef m] [MonadThrow ε m] (ref : Syntax) (e : ε) : m α :=
+  withRef ref (MonadThrow.throw e)
+
+instance : MonadThrow String MacroM := ⟨Macro.throwError⟩
+
+/-- A Lean `unsuportedSyntax` exception. -/
+structure UnsupportedSyntax
+
+@[inherit_doc UnsupportedSyntax] abbrev unsupportedSyntax := @UnsupportedSyntax.mk
+
+instance : Coe UnsupportedSyntax Macro.Exception := ⟨fun _ => .unsupportedSyntax⟩
+end
 
 /-! ## Syntax Sugar -/
 
