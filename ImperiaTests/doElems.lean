@@ -118,7 +118,20 @@ def doIfReassign (toggle : Bool) : String := Id.run μdo
 example : doIfReassign true = "bar" := rfl
 example : doIfReassign false = "baz" := rfl
 
+set_option linter.unusedVariables false in
+/-- Tests that an empty branch properly jumps to a join point. -/
+def doEmptyBranch : String := Id.run μdo
+  let mut x := "bar"
+  if true then
+    x := "baz"
+  return x
+
+example : doEmptyBranch = "baz" := rfl
+
 /--
+info: μdo scopes:
+  · mutable vars: [x]
+---
 info: μdo scopes:
   · mutable vars: [y]
   · mutable vars: [x]
@@ -138,7 +151,21 @@ def doIfLetMut (toggle : Bool) : Unit := μdo
   else
     let mut z := "baz"
     μdo_scopes%
+  μdo_scopes%
   ()
+
+/--
+error: `x` cannot be mutated, only variables declared using `let mut` can be mutated.
+If you did not intend to mutate but define `x`, consider using `let x` instead.
+-/
+#guard_msgs in
+/-- Tests that branches properly shadow variables. -/
+def doLetBranchShadow (toggle : Bool) : Unit := μdo
+  let mut x := "foo"
+  if toggle then
+    let x := "bar"
+    x := ()
+  nop
 
 def doMatch : Unit := μdo
   -- w/ jump

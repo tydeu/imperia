@@ -15,7 +15,7 @@ syntax (name := μdoScopes) "μdo_scopes%" : doElem
 def elabMDoScopes : MDoElab := fun x xs expectedType? => do
   let scopes ← getMDoScopes
   let scopes := flip MessageData.joinSep "\n" <| scopes.stack.map fun scope =>
-    m!"· mutable vars: {scope.vars.toString}"
+    m!"· mutable vars: {scope.vars.map (·.name)}"
   logInfoAt x m!"μdo scopes:{indentD scopes}"
   elabMDoElems xs expectedType?
 
@@ -155,7 +155,7 @@ def elabDoIf := adaptMDoMacro fun x xs => do
     | throwAt x "ill-formed `do` if syntax"
   withRef tk do
   mkMDoJmp xs fun jmp => do
-  let e ← if let some e := e? then mkMDoBranch e jmp else jmp.mkTerm
+  let e ← if let some e := e? then mkMDoBranch e jmp else mkMDoEmptyBranch jmp
   let e ← (ecs.zip ets).foldrM (init := e) fun (c, t) e => do
     mkMDoIf c (← mkMDoBranch t jmp) e
   mkMDoIf c (← mkMDoBranch t jmp) e
@@ -166,9 +166,9 @@ def elabDoUnless := adaptMDoMacro fun x xs => do
     | throwAt x "ill-formed `do` unless syntax"
   withRef tk do
   mkMDoJmp xs fun jmp => do
-  let x ← mkMDoBranch x jmp
-  let jmp ← jmp.mkTerm
-  mkMDoTerm c fun c => `(if $c then $jmp else $x)
+  let e ← mkMDoBranch x jmp
+  let t ← mkMDoEmptyBranch jmp
+  mkMDoTerm c fun c => `(if $c then $t else $e)
 
 @[μdo_elab doReturn]
 def elabDoReturn := adaptMDoMacro fun x xs => do

@@ -89,12 +89,18 @@ def mkMDoAndThen
 
 abbrev MDoJmp := Option Ident
 
-@[inline]
-def MDoJmp.mkTerm [Monad m] [MonadQuotation m] (jmp : MDoJmp) : m Term :=
-  if let some jmp := jmp then pure jmp else ``(nop)
-
 /-- Elaboration gadget for defining jumps. -/
 scoped syntax (name := μdoJump) "μdo_jump% " doElem* : term
+
+/-- Elaboration gadget for creating a new `μdo` scope. -/
+scoped syntax:arg (name := μdoBranch) "μdo_branch% " (ppLine doElem)+ : term
+
+/-- Elaboration gadget for performing jumps. -/
+syntax (name := μdoGoto) "μdo_goto% " ident : doElem
+
+@[inline]
+def mkMDoEmptyBranch [Monad m] [MonadQuotation m] (jmp : MDoJmp) : m Term :=
+  if let some jmp := jmp then `(μdo_branch% μdo_goto% $jmp) else ``(nop)
 
 @[always_inline, inline]
 def mkMDoJmp
@@ -107,13 +113,6 @@ def mkMDoJmp
     withRef xs[0]  `(let $jmp := μdo_jump% $xs*; $body)
   else
     f none
-
-/-- Elaboration gadget for performing jumps. -/
-syntax μdoGoto := "μdo_goto% " ident
-attribute [scoped doElem_parser] μdoGoto
-
-/-- Elaboration gadget for creating a new `μdo` scope. -/
-scoped syntax:arg (name := μdoBranch) "μdo_branch% " (ppLine doElem)+ : term
 
 @[inline]
 def mkMDoBranch [Monad m] [MonadQuotation m] (x : DoSeq) (jmp : MDoJmp) : m Term := do
@@ -193,19 +192,20 @@ def withNewExtScope
   finally
     modifyEnv (ext.modifyState · (·.pop))
 
+structure MDoVar where
+  name : Name
+  mutable : Bool
+
 /-- The state of a `μdo` block. -/
 structure MDoScope where
   /-- Mutable variables. -/
-  vars : List Name := {}
+  vars : List MDoVar := {}
   deriving Inhabited
 
 abbrev MDoScopes := OptScopes MDoScope
 
 initialize μdoExt : EnvExtension MDoScopes ←
   registerEnvExtension (pure {})
-
-@[inline] def MDoScope.modifyVars (f : List Name → List Name) (self : MDoScope) : MDoScope :=
-  {self with vars := f self.vars}
 
 @[inline]
 def withNewMDoScope
@@ -342,26 +342,17 @@ def adaptMDoMacro (f : DoElem → Array DoElem → MacroM Term) : MDoElab :=
 /-! ## `μdo` Mutable Variable Helpers -/
 
 @[inline]
-def MDoScopes.hasVar (x : Name) (self : MDoScopes ): Bool :=
-  self.any (·.vars.contains x)
-
-@[inline]
-def registerMDoVar (id : Ident) : MDoElabM PUnit := do
-  modifyMDoScope (·.modifyVars (·.insert id.getId))
-
-@[inline]
-def unregisterMDoVar (id : Ident) : MDoElabM PUnit := do
-  -- FIXME: does not consider parent scopes
-  modifyMDoScope (·.modifyVars (·.erase id.getId))
+def MDoScopes.hasMutableVar (x : Name) (self : MDoScopes) : Bool :=
+  match self.stack.findSome? (·.vars.find? (·.name == x)) with
+  | some v => v.mutable
+  | none => false
 
 def declareMDoVar (var : Ident) (mutable : Bool) : MDoElabM PUnit :=
-  if mutable then registerMDoVar var else unregisterMDoVar var
+  let var := {name := var.getId, mutable}
+  modifyMDoScope fun s => {s with vars := var :: s.vars}
 
 def declareMDoVars (vars : Array Var) (mutable : Bool) : MDoElabM PUnit := do
-  if mutable then
-    vars.forM fun var => registerMDoVar ⟨var⟩
-  else
-    vars.forM fun var => unregisterMDoVar ⟨var⟩
+  vars.forM fun var => declareMDoVar ⟨var⟩ mutable
 
 def notReassignable (x : Name) : MessageData :=
   m!"`{x.simpMacroScopes}` cannot be mutated, \
@@ -370,17 +361,17 @@ def notReassignable (x : Name) : MessageData :=
   consider using `let {x.simpMacroScopes}` instead."
 
 def checkMDoVarReassignable (x : Name) : MDoElabM PUnit := do
-  unless (← getMDoScopes).hasVar x do raise (notReassignable x)
+  unless (← getMDoScopes).hasMutableVar x do raise (notReassignable x)
 
 def checkMDoVarsReassignable (vars : Array Var) : MDoElabM PUnit := do
   let scopes ← getMDoScopes
   vars.forM fun x => do
-    unless scopes.hasVar x.getId do
+    unless scopes.hasMutableVar x.getId do
       raise (notReassignable x.getId)
 
 def MDoScopes.abstractVars (self : MDoScopes) (x : Term) : MDoElabM Term := do
   let vs := self.stack.foldl (init := #[]) fun vs scope =>
-    scope.vars.foldl (init := vs) fun vs var => vs.push (mkIdent var)
+    scope.vars.foldl (init := vs) fun vs var => vs.push (mkIdent var.name)
   withRef x `(fun $vs* => $x)
 
 @[inline] def abstractMDoVars (x : Term) : MDoElabM Term := do
@@ -390,7 +381,7 @@ def MDoScopes.applyVars (self : MDoScopes) (x : Term) : MDoElabM Term := do
   withRef x do
   self.stack.foldlM (init := x) fun x scope => do
     scope.vars.foldlM (init := x) fun x var => do
-      `($x $(mkIdent var))
+      `($x $(mkIdent var.name))
 
 @[inline] def applyMDoVars (x : Term) : MDoElabM Term := do
   MDoScopes.applyVars ((← getMDoScopes).pop) x
