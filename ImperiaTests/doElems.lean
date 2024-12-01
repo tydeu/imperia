@@ -85,10 +85,10 @@ set_option linter.unusedVariables false in
 def doReassign : Unit := μdo
   let mut x := ()
   -- test lift method in reassign RHS
-  x := (← pure ())
+  x := (← pure x)
   () := (← pure ())
   x ← pure (← pure ())
-  () ← pure (← pure ())
+  () ← pure (← pure x)
   -- basic syntax
   x := ()
   x ← pure ()
