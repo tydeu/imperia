@@ -106,10 +106,12 @@ def elabDoReassign := adaptMDoMacroElab fun x xs => withRef x do
   match x with
   | `(Term.doReassign|$id := $v) =>
     checkMDoVarReassignable id.getId
-    `(let $id := $v; $(← mkMDoOfElems xs))
+    let body ← mkMDoOfElems xs
+    mkMDoTerm v fun v => `(let $id := $v; $body)
   | `(Term.doReassign|$decl:letPatDecl) =>
     checkMDoVarsReassignable (← getLetPatDeclVars decl)
-    `(let $decl:letPatDecl; $(← mkMDoOfElems xs))
+    let body ← mkMDoOfElems xs
+    mkMDoTerm decl fun decl => `(let $decl:letPatDecl; $body)
   | x => throwAt x "ill-formed `do` reassignment syntax"
 
 @[μdo_elab doReassignArrow]

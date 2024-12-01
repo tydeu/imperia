@@ -81,12 +81,20 @@ def doLetLeak : Nat := Id.run μdo
     pure x
   return x
 
+set_option linter.unusedVariables false in
 def doReassign : Unit := μdo
-  _ := ()
+  let mut x := ()
+  -- test lift method in reassign RHS
+  x := (← pure ())
+  () := (← pure ())
+  x ← pure (← pure ())
+  () ← pure (← pure ())
+  -- basic syntax
+  x := ()
+  x ← pure ()
   0 ← pure 1
     | ← pure ()
-  _ ← pure ""
-  ()
+  x
 
 /--
 error: `x` cannot be mutated,
