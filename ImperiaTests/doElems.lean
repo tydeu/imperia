@@ -139,3 +139,4 @@ def doRaiseNonterminal : Except Unit Unit := μdo
 open Lean Elab Command in
 def doTrace : CommandElabM Unit := μdo
   trace[bogus] "some text"
+  return -- TODO: Fox need for this return

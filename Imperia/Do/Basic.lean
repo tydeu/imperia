@@ -113,7 +113,7 @@ def elabMDoUsing
 : TermElabM Expr := do
   if let elabFn::elabFns := elabFns then
     try
-      Term.withInfoContext' x (mkInfo := Term.mkTermInfo elabFn.declName (expectedType? := expectedType?) x) do
+      Term.withTermInfoContext' elabFn.declName x (expectedType? := expectedType?) do
         elabFn.value x xs expectedType?
     catch
       | ex@(.internal id _) =>
@@ -143,7 +143,7 @@ def elabMDoSeq : Term.TermElab := fun stx expectedType? => do
     | some (decl, xNew?) =>
       let xNew ← liftMacroM <| liftExcept xNew?
       let stxNew ← `(μdo% $(⟨xNew⟩) $xs*)
-      Term.withInfoContext' x (mkInfo := Term.mkTermInfo decl (expectedType? := expectedType?) x) <|
+      Term.withTermInfoContext' decl x (expectedType? := expectedType?) do
       Term.withMacroExpansion stx stxNew do
       withRef stxNew <| Term.elabTerm stxNew expectedType?
     | _ =>
