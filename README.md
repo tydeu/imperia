@@ -48,4 +48,4 @@ def charLitFnAux (startPos : String.Pos) : ParserFn := μdo
 
 While it may look better, recall that `ParserFn` was not a monad for a reason -- performance! Fortunately, Imperia's approach manages to maintain the same IR and even the same `simp` normal forms as the original implementation.
 
-If this has piqued your curiosity, [tests/parser.lean](tests/parser.lean) contains the nitty-gritty details of how this Parsec-like `ParserFn` function is implemented with Imperia.
+If this has piqued your curiosity, [ImperiaTests/parser.lean](ImperiaTests/parser.lean) contains the nitty-gritty details of how this Parsec-like `ParserFn` function is implemented with Imperia.
