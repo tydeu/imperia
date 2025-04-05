@@ -29,8 +29,8 @@ def mkBinderIdentPat (x : TSyntax [identKind, ``Term.hole]) : Term := Unhygienic
 
 instance : Coe (TSyntax [identKind, ``Term.hole]) Term := ⟨mkBinderIdentPat⟩
 
-def expandDoSeq (x : DoSeq) : MacroM (Array DoElem) :=
+def expandDoSeq (x : DoSeq) : Array DoElem :=
   match x with
-  | `(Term.doSeq|$[$xs $[;]?]*) => pure xs
-  | `(Term.doSeq|{$[$xs $[;]?]*}) => pure xs
-  | x => Macro.throwErrorAt x "ill-formed `do` sequence"
+  | `(Term.doSeq|$[$xs $[;]?]*) => xs
+  | `(Term.doSeq|{$[$xs $[;]?]*}) => xs
+  | _ => #[]
