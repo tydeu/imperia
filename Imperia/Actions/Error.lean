@@ -8,60 +8,75 @@ namespace Imperia
 
 /-! ## Monadic Error -/
 
-/-- Auxiliary class for inferring the errpr type of imperatives. -/
-class ErrorOut (ε : outParam $ Type u) (μ : Type v)
-
-instance [MonadExcept ε m] : ErrorOut ε (m PUnit) where
+/-- Auxiliary class for inferring the error type of monads. -/
+class MonadErrorOut (ε : outParam $ Type u) (m : Type v → Type w)
 
 class MonadThrow (ε : semiOutParam $ Type u) (m : Type v → Type w) where
   throw : ε → m α
 
-instance [MonadExceptOf ε m] : MonadThrow ε m := ⟨throw⟩
-
-instance (priority := low) [MonadThrow ε m] : ErrorOut ε (m PUnit) where
+instance (priority := low) [MonadThrow ε m] : MonadErrorOut ε m where
 
 class MonadTryCatch (ε : semiOutParam $ Type u) (m : Type v → Type w) where
   tryCatch : m α → (ε → m α) → m α
 
-instance [MonadExceptOf ε m] : MonadTryCatch ε m := ⟨tryCatch⟩
+instance (priority := low) [MonadTryCatch ε m] : MonadErrorOut ε m where
 
-instance (priority := low) [MonadTryCatch ε m] : ErrorOut ε (m PUnit) where
+instance [MonadExcept ε m] : MonadErrorOut ε m := {}
+instance (priority := mid) [MonadExceptOf ε m] : MonadThrow ε m := ⟨throw⟩
+instance (priority := mid) [MonadExceptOf ε m] : MonadTryCatch ε m := ⟨tryCatch⟩
 
-instance [MonadThrow ε m] [MonadTryCatch ε m] : MonadExceptOf ε m where
+instance (priority := mid) [MonadThrow ε m] [MonadTryCatch ε m] : MonadExceptOf ε m where
   throw := MonadThrow.throw
   tryCatch := MonadTryCatch.tryCatch
 
 /-! ## Imperative Error -/
+
+/-- Auxiliary class for inferring the error type of imperatives. -/
+class ErrorOut (ε : outParam $ Type u) (μ : Type v)
+
+instance [MonadErrorOut ε m] : ErrorOut ε (m α) := {}
 
 class Throw (ε : semiOutParam $ Type u) (μ : Type v) where
   throw (e : ε) : μ
 
 instance [MonadThrow ε m] : Throw ε (m α) := ⟨MonadThrow.throw⟩
 
-instance (priority := low) [Throw ε μ] : ErrorOut ε μ where
+instance (priority := low) [Throw ε μ] : ErrorOut ε μ := {}
 
 class SetError (ε : semiOutParam $ Type u) (μ : Type v) where
   setError (e : ε) : μ
 
-instance (priority := low) [SetError ε μ] : ErrorOut ε μ where
+instance (priority := low) [SetError ε μ] : ErrorOut ε μ := {}
 
-abbrev setError [SetError ε μ] (e : ε) : μ :=
-  SetError.setError e
-
-abbrev setTheError (ε : Type u) [SetError ε μ] (e : ε) : μ :=
+abbrev SetError.setTheError (ε : Type u) [SetError ε μ] (e : ε) : μ :=
   setError e
+
+export SetError (setError setTheError)
 
 /-! ## Unit Error -/
 
-instance [MonadTryCatch PUnit m] : OrElse (m α) := ⟨MonadTryCatch.tryCatch⟩
+class MonadOrElse (m : Type u → Type v) where
+  orElse : m α → (Unit → m α) → m α
 
-instance (priority := low) [Alternative m] : MonadExceptOf PUnit m where
-  throw _ := Alternative.failure
-  tryCatch := Alternative.orElse
+instance [MonadOrElse m] : OrElse (m α) := ⟨MonadOrElse.orElse⟩
+instance (priority := mid) [MonadOrElse m] : MonadTryCatch Unit m := ⟨MonadOrElse.orElse⟩
 
-instance (priority := low) [Applicative m] [MonadExceptOf PUnit m] : Alternative m where
-  failure := throw ()
-  orElse := tryCatch
+@[inline, always_inline]
+def MonadTryCatch.orElse [MonadTryCatch ε m] (x : m α) (h : Unit → m α) : m α :=
+  MonadTryCatch.tryCatch x fun (_ : ε) => h ()
+
+abbrev MonadOrElse.ofTryCatchThe (ε) [MonadTryCatch ε m] : MonadOrElse m where
+  orElse := MonadTryCatch.orElse (ε := ε)
+
+abbrev MonadOrElse.ofTryCatch [MonadTryCatch ε m] : MonadOrElse m :=
+  ofTryCatchThe ε
+
+instance (priority := mid) [Alternative m] : MonadOrElse m := ⟨Alternative.orElse⟩
+instance (priority := mid) [Alternative m] : MonadThrow Unit m := ⟨fun _ => Alternative.failure⟩
+
+instance (priority := mid) [Applicative m] [MonadThrow Unit m] [MonadOrElse m] : Alternative m where
+  failure := MonadThrow.throw ()
+  orElse := MonadOrElse.orElse
 
 /-! ## Syntax Sugar -/
 
