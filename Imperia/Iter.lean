@@ -16,7 +16,8 @@ class Iterable (μ : Type u) (ρ : Type v) (α : outParam $ Type w) where
 
 export Iterable (iter)
 
-instance : Iterable μ (Iter μ α) α := ⟨id⟩
+-- Ensures that one `μ` can assign the other if necessary.
+@[default_instance] instance : Iterable μ (Iter μ α) α := ⟨id⟩
 
 namespace Iter
 

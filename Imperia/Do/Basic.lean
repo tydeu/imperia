@@ -329,11 +329,14 @@ def adaptMDoMacro (f : DoElem → Array DoElem → MacroM Term) : MDoElab :=
     discard <| Meta.isDefEq expectedType mu
   withNewMDoScope do
   let x ← ``(Cont.run $(← mkMDoOfSeq x))
-  Term.withMacroExpansion stx x <| Term.elabTerm x mu
+  Term.withMacroExpansion stx x do
+  Term.elabTerm x mu
 
 @[term_elab μdoBranch] def elabMDoBranch : Term.TermElab := fun stx expectedType? => do
   let `(μdo_branch% $xs*) := stx
     | throwAt stx "ill-formed `μdo_branch%` syntax"
+  -- FIXME: This does not preserve μdo scopes
+  Term.tryPostponeIfNoneOrMVar expectedType?
   withNewMDoScope do
   elabMDoElems xs expectedType?
 

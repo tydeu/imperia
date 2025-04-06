@@ -1,4 +1,3 @@
-
 /-
 Copyright (c) 2024 Mac Malone. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
@@ -44,6 +43,18 @@ def testRef (s : String) : IO Unit :=
 def forInTest (s : String) : IO Unit := μdo
   for c in s do
     IO.println c
+
+/--
+info: def forInTest : String → IO Unit :=
+fun s =>
+  Cont.run
+    (iter s
+      (fun c _μdo_loop => do
+        liftM (IO.println c)
+        _μdo_loop ())
+      fun x => nop)
+-/
+#guard_msgs in #print forInTest
 
 #guard_ir String.chars.loop._at.forInTest._spec_1._at.forInTest._spec_2 testRef.loop
 

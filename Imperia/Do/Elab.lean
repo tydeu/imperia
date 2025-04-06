@@ -196,7 +196,7 @@ def elabDoRaise := adaptMDoMacro fun x xs => do
     ``(Throw.throw ())
 
 @[μdo_elab doFor]
-def elabDoFor := adaptMDoMacro fun x xs => do
+def elabDoFor := adaptMDoMacroElab fun x xs => do
   let `(Term.doFor|for%$tk $ds,* do $x) := x
     | throwAt x "ill-formed `do` for syntax"
   withRef tk do
@@ -204,8 +204,15 @@ def elabDoFor := adaptMDoMacro fun x xs => do
   if h : ds.size = 1 then
     let `(Term.doForDecl|$[$h? :]? $v in $it) := ds[0]
       | throwAt ds[0] "ill-formed for `in` syntax"
-    let done ← `(fun () => $(← mkMDoOfElems xs))
-    let step ← ``(fun $v loop => Cont.app $(← mkMDoOfSeq x) loop)
-    ``(Iterable.iter $it $step $done)
+    let loop : Ident ← `(_μdo_loop)
+    let done ← abstractMDoVars (← mkMDoOfElems xs)
+    let done ← `(fun _ => $done)
+    let goto ← (← getMDoScopes).applyVars (← `($loop ()))
+    let body ← mkMDoBranchOfElems (expandDoSeq x |>.push goto)
+    let body ← abstractMDoVars body
+    let step ← `(fun $v $loop => $body)
+    let iter ← ``(Iterable.iter $it $step $done)
+    let iter ← (← getMDoScopes).applyVars iter
+    return iter
   else
     raise "`μdo` only supports a `for` with a single `in`"
