@@ -35,12 +35,12 @@ info: unimplemented kinds:
   Lean.Parser.Term.doHave
   Lean.Parser.Term.doLetMetaExpr
   Lean.Parser.Term.doLetExpr
-  Lean.Parser.Term.doFor
   Lean.Parser.Term.doBreak
   Lean.Parser.Term.doContinue
   Lean.Parser.Term.doDbgTrace
 ---
 info: macro kinds:
+  doYield
   Lean.«doElemTrace[_]__»
   Lean.doElemRepeat__Until_
   Lean.doElemRepeat_

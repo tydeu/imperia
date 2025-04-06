@@ -4,6 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Mac Malone
 -/
 import Imperia.Do.Basic
+import Imperia.Iter
 
 open Lean Elab Term.Do Parser
 
@@ -193,3 +194,18 @@ def elabDoRaise := adaptMDoMacro fun x xs => do
     mkMDoTerm v fun v => ``(Throw.throw $v)
   else
     ``(Throw.throw ())
+
+@[μdo_elab doFor]
+def elabDoFor := adaptMDoMacro fun x xs => do
+  let `(Term.doFor|for%$tk $ds,* do $x) := x
+    | throwAt x "ill-formed `do` for syntax"
+  withRef tk do
+  let ds := ds.getElems
+  if h : ds.size = 1 then
+    let `(Term.doForDecl|$[$h? :]? $v in $it) := ds[0]
+      | throwAt ds[0] "ill-formed for `in` syntax"
+    let done ← `(fun () => $(← mkMDoOfElems xs))
+    let step ← ``(fun $v loop => Cont.app $(← mkMDoOfSeq x) loop)
+    ``(Iterable.iter $it $step $done)
+  else
+    raise "`μdo` only supports a `for` with a single `in`"
